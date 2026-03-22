@@ -21,6 +21,8 @@ Add a comprehensive bank balances management system to the portfolio dashboard. 
 - Complete authentication and authorization system
 - Template learning for progressively faster processing
 
+**Migration Note:** Existing Zerodha `Account` records will be linked to the new `User` model via migration. Each existing account will be assigned to a default user created during migration, or users can be prompted to register/login and claim their accounts.
+
 ---
 
 ## 1. System Architecture
@@ -654,6 +656,8 @@ Getters:
 
 3. BACKGROUND PARSING (Celery Worker or Immediate)
    ↓
+   **Note:** If Celery is configured (CELERY_BROKER_URL set), parsing runs asynchronously in a Celery worker. If Celery is not available, parsing runs synchronously in the request handler (blocking, but functional). For production deployments, Celery is strongly recommended for better user experience.
+
    PDFParserService.parse_statement(statement_id):
 
      a) Extract Text
