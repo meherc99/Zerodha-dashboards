@@ -19,6 +19,9 @@ class Account(db.Model):
     access_token_encrypted = db.Column(db.Text)
     request_token_encrypted = db.Column(db.Text)
 
+    # Foreign key to user (will be added in migration)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+
     # Status and metadata
     is_active = db.Column(db.Boolean, default=True)
     last_synced_at = db.Column(db.DateTime)
@@ -26,6 +29,7 @@ class Account(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
+    user = db.relationship('User', back_populates='accounts')
     holdings = db.relationship('Holding', back_populates='account', cascade='all, delete-orphan')
     timeseries = db.relationship('PortfolioTimeseries', back_populates='account', cascade='all, delete-orphan')
     sector_allocations = db.relationship('SectorAllocation', back_populates='account', cascade='all, delete-orphan')

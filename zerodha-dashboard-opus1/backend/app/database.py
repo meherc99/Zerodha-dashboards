@@ -13,7 +13,7 @@ def init_db(app):
 
     with app.app_context():
         # Import models to register them with SQLAlchemy
-        from app.models import account, holding, snapshot, historical_price
+        from app.models import account, holding, snapshot, historical_price, user
 
         # Create all tables
         db.create_all()
