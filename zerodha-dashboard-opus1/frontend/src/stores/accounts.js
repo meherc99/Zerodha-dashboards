@@ -2,7 +2,7 @@
  * Pinia store for account management
  */
 import { defineStore } from 'pinia'
-import api from '@/services/api'
+import { api } from '@/services/api'
 
 export const useAccountsStore = defineStore('accounts', {
   state: () => ({

@@ -1,8 +1,23 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Dashboard from '@/views/Dashboard.vue'
 import Accounts from '@/views/Accounts.vue'
+import Login from '@/views/auth/Login.vue'
+import Register from '@/views/auth/Register.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const routes = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: Login,
+    meta: { requiresGuest: true }
+  },
+  {
+    path: '/register',
+    name: 'Register',
+    component: Register,
+    meta: { requiresGuest: true }
+  },
   {
     path: '/',
     redirect: '/dashboard/overview'
@@ -11,6 +26,7 @@ const routes = [
     path: '/dashboard',
     name: 'Dashboard',
     component: Dashboard,
+    meta: { requiresAuth: true },
     redirect: '/dashboard/overview',
     children: [
       {
@@ -43,13 +59,29 @@ const routes = [
   {
     path: '/accounts',
     name: 'Accounts',
-    component: Accounts
+    component: Accounts,
+    meta: { requiresAuth: true }
   }
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+// Navigation guards
+router.beforeEach((to, from, next) => {
+  const authStore = useAuthStore()
+
+  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    // Redirect to login if not authenticated
+    next('/login')
+  } else if (to.meta.requiresGuest && authStore.isAuthenticated) {
+    // Redirect to dashboard if already logged in
+    next('/dashboard')
+  } else {
+    next()
+  }
 })
 
 export default router

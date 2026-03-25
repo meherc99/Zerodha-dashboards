@@ -2,7 +2,7 @@
  * Pinia store for holdings and portfolio data
  */
 import { defineStore } from 'pinia'
-import api from '@/services/api'
+import { api } from '@/services/api'
 
 export const useHoldingsStore = defineStore('holdings', {
   state: () => ({

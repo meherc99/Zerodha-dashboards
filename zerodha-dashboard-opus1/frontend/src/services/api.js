@@ -2,6 +2,7 @@
  * API client for communicating with the backend
  */
 import axios from 'axios'
+import router from '@/router'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
 
@@ -13,16 +14,34 @@ const apiClient = axios.create({
   },
 })
 
-// Response interceptor for error handling
+// Request interceptor - add token to all requests
+apiClient.interceptors.request.use(config => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// Response interceptor - handle 401 errors
 apiClient.interceptors.response.use(
   response => response,
   error => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid
+      localStorage.removeItem('token')
+      router.push('/login')
+    }
     console.error('API Error:', error)
     return Promise.reject(error)
   }
 )
 
-export default {
+// Export axios instance directly for auth store
+export default apiClient
+
+// Also export legacy API methods for backward compatibility
+export const api = {
   // Health check
   healthCheck() {
     return apiClient.get('/health')

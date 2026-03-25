@@ -1,16 +1,19 @@
 <template>
   <div id="app">
-    <nav class="navbar">
+    <nav v-if="!isAuthPage" class="navbar">
       <div class="nav-brand">
         <h1>📊 Zerodha Dashboard</h1>
       </div>
       <div class="nav-links">
         <router-link to="/" class="nav-link">Dashboard</router-link>
         <router-link to="/accounts" class="nav-link">Accounts</router-link>
+        <button v-if="authStore.isAuthenticated" @click="handleLogout" class="logout-btn">
+          Logout
+        </button>
       </div>
     </nav>
 
-    <main class="main-content">
+    <main :class="{ 'main-content': !isAuthPage, 'auth-content': isAuthPage }">
       <router-view />
     </main>
 
@@ -29,9 +32,24 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useUiStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 
 const uiStore = useUiStore()
+const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+
+const isAuthPage = computed(() => {
+  return route.path === '/login' || route.path === '/register'
+})
+
+const handleLogout = async () => {
+  await authStore.logout()
+  router.push('/login')
+}
 </script>
 
 <style>
@@ -91,8 +109,29 @@ body {
   background: #eff6ff;
 }
 
+.logout-btn {
+  background: none;
+  border: none;
+  color: #6b7280;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.logout-btn:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
 .main-content {
   min-height: calc(100vh - 64px);
+}
+
+.auth-content {
+  min-height: 100vh;
 }
 
 /* Notifications */
