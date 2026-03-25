@@ -6,6 +6,7 @@ from app.models.holding import Holding
 from app.models.snapshot import Snapshot, PortfolioTimeseries, SectorAllocation
 from app.models.historical_price import HistoricalPrice
 from app.models.user import User
+from app.models.bank_account import BankAccount
 
 __all__ = [
     'Account',
@@ -14,5 +15,6 @@ __all__ = [
     'PortfolioTimeseries',
     'SectorAllocation',
     'HistoricalPrice',
-    'User'
+    'User',
+    'BankAccount'
 ]

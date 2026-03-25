@@ -21,7 +21,8 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
 
     # Relationships
-    # bank_accounts relationship will be added when BankAccount model is created
+    bank_accounts = db.relationship('BankAccount', back_populates='user', lazy='dynamic',
+                                   cascade='all, delete-orphan')
     accounts = db.relationship('Account', back_populates='user', lazy='dynamic')
 
     def __repr__(self):
