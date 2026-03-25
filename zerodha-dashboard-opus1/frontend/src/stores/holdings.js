@@ -23,6 +23,144 @@ export const useHoldingsStore = defineStore('holdings', {
     mfHoldings: (state) =>
       state.holdings.filter(h => h.instrument_type === 'mf'),
 
+    usHoldings: (state) =>
+      state.holdings.filter(h => h.instrument_type === 'us_equity'),
+
+    fdHoldings: (state) =>
+      state.holdings.filter(h => h.instrument_type === 'fd'),
+
+    equitySummary: (state) => {
+      const equity = state.holdings.filter(h => h.instrument_type === 'equity')
+      if (equity.length === 0) {
+        return {
+          current_value: 0,
+          total_pnl: 0,
+          total_pnl_percentage: 0,
+          day_change: 0,
+          total_holdings: 0,
+          total_investment: 0
+        }
+      }
+
+      const totalInvestment = equity.reduce((sum, h) =>
+        sum + (h.average_price * h.quantity), 0)
+      const currentValue = equity.reduce((sum, h) =>
+        sum + h.current_value, 0)
+      const totalPnl = equity.reduce((sum, h) =>
+        sum + h.pnl, 0)
+      const dayChange = equity.reduce((sum, h) =>
+        sum + (h.day_change || 0), 0)
+
+      return {
+        current_value: currentValue,
+        total_pnl: totalPnl,
+        total_pnl_percentage: totalInvestment > 0
+          ? (totalPnl / totalInvestment) * 100
+          : 0,
+        day_change: dayChange,
+        total_holdings: equity.length,
+        total_investment: totalInvestment
+      }
+    },
+
+    mfSummary: (state) => {
+      const mf = state.holdings.filter(h => h.instrument_type === 'mf')
+      if (mf.length === 0) {
+        return {
+          current_value: 0,
+          total_pnl: 0,
+          total_pnl_percentage: 0,
+          day_change: 0,
+          total_holdings: 0,
+          total_investment: 0
+        }
+      }
+
+      const totalInvestment = mf.reduce((sum, h) =>
+        sum + (h.average_price * h.quantity), 0)
+      const currentValue = mf.reduce((sum, h) =>
+        sum + h.current_value, 0)
+      const totalPnl = mf.reduce((sum, h) =>
+        sum + h.pnl, 0)
+      const dayChange = mf.reduce((sum, h) =>
+        sum + (h.day_change || 0), 0)
+
+      return {
+        current_value: currentValue,
+        total_pnl: totalPnl,
+        total_pnl_percentage: totalInvestment > 0
+          ? (totalPnl / totalInvestment) * 100
+          : 0,
+        day_change: dayChange,
+        total_holdings: mf.length,
+        total_investment: totalInvestment
+      }
+    },
+
+    usSummary: (state) => {
+      const us = state.holdings.filter(h => h.instrument_type === 'us_equity')
+      if (us.length === 0) {
+        return {
+          current_value: 0,
+          total_pnl: 0,
+          total_pnl_percentage: 0,
+          day_change: 0,
+          total_holdings: 0,
+          total_investment: 0
+        }
+      }
+
+      const totalInvestment = us.reduce((sum, h) =>
+        sum + (h.average_price * h.quantity), 0)
+      const currentValue = us.reduce((sum, h) =>
+        sum + h.current_value, 0)
+      const totalPnl = us.reduce((sum, h) =>
+        sum + h.pnl, 0)
+      const dayChange = us.reduce((sum, h) =>
+        sum + (h.day_change || 0), 0)
+
+      return {
+        current_value: currentValue,
+        total_pnl: totalPnl,
+        total_pnl_percentage: totalInvestment > 0
+          ? (totalPnl / totalInvestment) * 100
+          : 0,
+        day_change: dayChange,
+        total_holdings: us.length,
+        total_investment: totalInvestment
+      }
+    },
+
+    fdSummary: (state) => {
+      const fds = state.holdings.filter(h => h.instrument_type === 'fd')
+      if (fds.length === 0) {
+        return {
+          current_value: 0,
+          total_interest: 0,
+          total_interest_percentage: 0,
+          total_holdings: 0,
+          total_investment: 0
+        }
+      }
+
+      const totalInvestment = fds.reduce((sum, h) =>
+        sum + h.average_price, 0)
+      const currentValue = fds.reduce((sum, h) =>
+        sum + h.current_value, 0)
+      const totalInterest = fds.reduce((sum, h) =>
+        sum + h.pnl, 0)
+
+      return {
+        current_value: currentValue,
+        total_interest: totalInterest,
+        total_interest_percentage: totalInvestment > 0
+          ? (totalInterest / totalInvestment) * 100
+          : 0,
+        total_holdings: fds.length,
+        total_investment: totalInvestment
+      }
+    },
+
     topPerformers: (state) =>
       [...state.holdings]
         .sort((a, b) => b.pnl_percentage - a.pnl_percentage)
@@ -128,6 +266,76 @@ export const useHoldingsStore = defineStore('holdings', {
         }
       } catch (error) {
         this.error = error.response?.data?.error || 'Failed to sync holdings'
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async uploadUSHoldings(file, accountId) {
+      this.loading = true
+      this.error = null
+      try {
+        const response = await api.uploadUSHoldings(file, accountId)
+        // Refresh holdings after upload
+        await this.fetchHoldings(accountId)
+        return response.data
+      } catch (error) {
+        this.error = error.response?.data?.error || 'Failed to upload file'
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async refreshUSPrices(accountId = null) {
+      this.loading = true
+      this.error = null
+      try {
+        await api.refreshUSPrices(accountId)
+        // Refresh holdings after price update
+        if (accountId) {
+          await this.fetchHoldings(accountId)
+        } else {
+          await this.fetchAggregatedHoldings()
+        }
+      } catch (error) {
+        this.error = error.response?.data?.error || 'Failed to refresh prices'
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async uploadFDHoldings(file, accountId) {
+      this.loading = true
+      this.error = null
+      try {
+        const response = await api.uploadFDHoldings(file, accountId)
+        // Refresh holdings after upload
+        await this.fetchHoldings(accountId)
+        return response.data
+      } catch (error) {
+        this.error = error.response?.data?.error || 'Failed to upload file'
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async refreshFDValues(accountId = null) {
+      this.loading = true
+      this.error = null
+      try {
+        await api.refreshFDValues(accountId)
+        // Refresh holdings after value update
+        if (accountId) {
+          await this.fetchHoldings(accountId)
+        } else {
+          await this.fetchAggregatedHoldings()
+        }
+      } catch (error) {
+        this.error = error.response?.data?.error || 'Failed to refresh FD values'
         throw error
       } finally {
         this.loading = false

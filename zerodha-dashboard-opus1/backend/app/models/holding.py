@@ -16,7 +16,8 @@ class Holding(db.Model):
 
     # Instrument details
     tradingsymbol = db.Column(db.String(50), nullable=False)
-    instrument_type = db.Column(db.String(10), nullable=False)  # 'equity' or 'mf'
+    instrument_type = db.Column(db.String(20), nullable=False)  # 'equity', 'mf', or 'us_equity'
+    market = db.Column(db.String(10), default='IN')  # 'IN' or 'US'
     exchange = db.Column(db.String(10))
     isin = db.Column(db.String(20))
 
@@ -61,6 +62,7 @@ class Holding(db.Model):
             'tradingsymbol': self.tradingsymbol,
             'exchange': self.exchange,
             'instrument_type': self.instrument_type,
+            'market': self.market,
             'isin': self.isin,
             'quantity': self.quantity,
             'average_price': float(self.average_price) if self.average_price else 0,

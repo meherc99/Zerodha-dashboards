@@ -62,6 +62,46 @@ export default {
     return apiClient.post('/holdings/sync', { account_id: accountId })
   },
 
+  // US Holdings
+  uploadUSHoldings(file, accountId) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('account_id', accountId)
+
+    return apiClient.post('/holdings/us/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 60000  // Longer timeout for file upload + price fetching
+    })
+  },
+
+  refreshUSPrices(accountId = null) {
+    return apiClient.post('/holdings/us/refresh-prices', {
+      account_id: accountId
+    })
+  },
+
+  // Fixed Deposits
+  uploadFDHoldings(file, accountId) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('account_id', accountId)
+
+    return apiClient.post('/holdings/fd/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 30000
+    })
+  },
+
+  refreshFDValues(accountId = null) {
+    return apiClient.post('/holdings/fd/refresh-values', {
+      account_id: accountId
+    })
+  },
+
   // Analytics
   getPortfolioHistory(params = {}) {
     return apiClient.get('/analytics/portfolio-value-history', { params })
