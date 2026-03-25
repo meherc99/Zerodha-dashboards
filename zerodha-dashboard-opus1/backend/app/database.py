@@ -15,7 +15,4 @@ def init_db(app):
         # Import models to register them with SQLAlchemy
         from app.models import account, holding, snapshot, historical_price, user
 
-        # Create all tables
-        db.create_all()
-
         print("Database initialized successfully!")
