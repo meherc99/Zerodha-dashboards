@@ -160,6 +160,7 @@ def get_current_user():
 
 
 @auth_bp.route('/logout', methods=['POST'])
+@jwt_required()
 def logout():
     """
     Logout endpoint (client-side token deletion).
@@ -170,5 +171,6 @@ def logout():
 
     Returns:
         200: {"message": "Successfully logged out"}
+        401: Unauthorized if JWT token is missing or invalid
     """
     return jsonify({'message': 'Successfully logged out'}), 200

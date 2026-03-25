@@ -342,13 +342,11 @@ class TestGetCurrentUser:
 class TestLogout:
     """Tests for POST /api/auth/logout endpoint"""
 
-    def test_logout_endpoint_exists(self, client):
-        """Test that logout endpoint exists and returns success"""
+    def test_logout_requires_auth(self, client):
+        """Test that logout requires authentication"""
         response = client.post('/api/auth/logout')
 
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        assert 'message' in data
+        assert response.status_code == 401  # Should require JWT token
 
     def test_logout_with_token(self, client, sample_user):
         """Test logout with valid token (client-side deletion)"""
