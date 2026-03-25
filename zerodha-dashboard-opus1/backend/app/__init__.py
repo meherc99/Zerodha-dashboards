@@ -3,6 +3,7 @@ Flask application factory.
 """
 from flask import Flask
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager
 from app.config import config
 from app.database import init_db, db
 from app.services.scheduler_service import SchedulerService
@@ -36,17 +37,19 @@ def create_app(config_name=None):
 
     # Initialize extensions
     CORS(app, origins=app.config['CORS_ORIGINS'])
+    jwt = JWTManager(app)
 
     # Initialize database
     init_db(app)
 
     # Register blueprints
-    from app.routes import health_bp, accounts_bp, holdings_bp, analytics_bp
+    from app.routes import health_bp, accounts_bp, holdings_bp, analytics_bp, auth_bp
 
     app.register_blueprint(health_bp, url_prefix='/api')
     app.register_blueprint(accounts_bp)
     app.register_blueprint(holdings_bp)
     app.register_blueprint(analytics_bp)
+    app.register_blueprint(auth_bp)
 
     # Initialize scheduler
     scheduler = SchedulerService()

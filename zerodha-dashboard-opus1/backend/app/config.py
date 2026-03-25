@@ -41,6 +41,10 @@ class Config:
     RATELIMIT_ENABLED = True
     RATELIMIT_DEFAULT = "100 per hour"
 
+    # JWT Authentication
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', SECRET_KEY)
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
+
 
 class DevelopmentConfig(Config):
     """Development configuration"""
