@@ -8,6 +8,7 @@ from werkzeug.utils import secure_filename
 from app.database import db
 from app.models.bank_statement import BankStatement
 from app.models.bank_account import BankAccount
+from app.services.pdf_parser_service import PDFParserService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,16 @@ class BankStatementService:
             db.session.commit()
 
             logger.info(f"Created BankStatement record with ID {statement.id} for account {bank_account_id}")
+
+            # Trigger PDF parsing synchronously
+            try:
+                logger.info(f"Triggering PDF parsing for statement {statement.id}")
+                PDFParserService.parse_statement(statement.id)
+                logger.info(f"PDF parsing completed for statement {statement.id}")
+            except Exception as parse_error:
+                logger.error(f"PDF parsing failed for statement {statement.id}: {str(parse_error)}")
+                # Don't raise - let the upload succeed even if parsing fails
+                # User can retry parsing later
 
             return statement.id
 
