@@ -8,6 +8,7 @@ from app.models.historical_price import HistoricalPrice
 from app.models.user import User
 from app.models.bank_account import BankAccount
 from app.models.transaction_category import TransactionCategory
+from app.models.bank_statement import BankStatement
 from app.models.transaction import Transaction
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     'User',
     'BankAccount',
     'TransactionCategory',
+    'BankStatement',
     'Transaction'
 ]

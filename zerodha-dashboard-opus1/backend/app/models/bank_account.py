@@ -27,9 +27,8 @@ class BankAccount(db.Model):
     user = db.relationship('User', back_populates='bank_accounts')
     transactions = db.relationship('Transaction', back_populates='bank_account',
                                    cascade='all, delete-orphan')
-    # Forward references for future relationships
-    # statements = db.relationship('BankStatement', back_populates='account',
-    #                             cascade='all, delete-orphan')
+    statements = db.relationship('BankStatement', back_populates='bank_account',
+                                cascade='all, delete-orphan')
 
     def __repr__(self):
         return f'<BankAccount {self.bank_name} - {self.account_number}>'

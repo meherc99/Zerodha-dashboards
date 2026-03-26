@@ -11,7 +11,8 @@ class Transaction(db.Model):
     __tablename__ = 'transactions'
 
     id = db.Column(db.Integer, primary_key=True)
-    statement_id = db.Column(db.Integer, nullable=True, index=True)  # Forward reference - will add FK later
+    statement_id = db.Column(db.Integer, db.ForeignKey('bank_statements.id', ondelete='CASCADE'),
+                            nullable=True, index=True)
     bank_account_id = db.Column(db.Integer, db.ForeignKey('bank_accounts.id', ondelete='CASCADE'),
                                 nullable=False, index=True)
     transaction_date = db.Column(db.Date, nullable=False, index=True)
@@ -31,8 +32,7 @@ class Transaction(db.Model):
     # Relationships
     bank_account = db.relationship('BankAccount', back_populates='transactions')
     category = db.relationship('TransactionCategory', back_populates='transactions')
-    # Forward reference for statement relationship (will be added when BankStatement model is created)
-    # statement = db.relationship('BankStatement', back_populates='transactions')
+    statement = db.relationship('BankStatement', back_populates='transactions')
 
     # Indexes will be created in migration:
     # idx_transactions_bank_account_date (bank_account_id, transaction_date DESC)
