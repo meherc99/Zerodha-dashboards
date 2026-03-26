@@ -53,6 +53,12 @@ const routes = [
         path: 'fixed-deposits',
         name: 'FixedDeposits',
         component: () => import('@/views/dashboard/FixedDepositsTab.vue')
+      },
+      {
+        path: 'bank-balances',
+        name: 'BankBalances',
+        component: () => import('@/views/dashboard/BankBalancesTab.vue'),
+        meta: { requiresAuth: true }
       }
     ]
   },

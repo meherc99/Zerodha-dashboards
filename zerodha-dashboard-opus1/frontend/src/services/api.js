@@ -145,4 +145,25 @@ export const api = {
       params: { metric, period }
     })
   },
+
+  // Bank Accounts
+  getBankAccounts() {
+    return apiClient.get('/bank-accounts')
+  },
+
+  getBankAccount(accountId) {
+    return apiClient.get(`/bank-accounts/${accountId}`)
+  },
+
+  createBankAccount(data) {
+    return apiClient.post('/bank-accounts', data)
+  },
+
+  updateBankAccount(accountId, data) {
+    return apiClient.put(`/bank-accounts/${accountId}`, data)
+  },
+
+  deleteBankAccount(accountId) {
+    return apiClient.delete(`/bank-accounts/${accountId}`)
+  },
 }

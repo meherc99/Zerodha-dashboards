@@ -21,6 +21,10 @@
         <span class="icon">🏦</span>
         <span>Fixed Deposits</span>
       </router-link>
+      <router-link to="/dashboard/bank-balances" class="nav-item">
+        <span class="icon">💳</span>
+        <span>Bank Balances</span>
+      </router-link>
     </nav>
   </aside>
 </template>
