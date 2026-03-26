@@ -447,3 +447,86 @@ class PDFParserService:
 
             logger.error(f"Failed to parse statement {statement_id}: {str(e)}")
             raise
+
+    @staticmethod
+    def get_validation_warnings(transactions: List[Dict]) -> List[Dict]:
+        """
+        Generate validation warnings for parsed transaction data.
+
+        Args:
+            transactions: List of transaction dictionaries
+
+        Returns:
+            List of warning dictionaries with type, message, and severity
+        """
+        warnings = []
+
+        if not transactions:
+            return warnings
+
+        # Check for missing critical fields
+        for i, txn in enumerate(transactions):
+            # Missing date
+            if not txn.get('date'):
+                warnings.append({
+                    'type': 'missing_date',
+                    'message': f'Transaction at row {i + 1} is missing date',
+                    'severity': 'error'
+                })
+
+            # Missing amount
+            if not txn.get('amount'):
+                warnings.append({
+                    'type': 'missing_amount',
+                    'message': f'Transaction at row {i + 1} is missing amount',
+                    'severity': 'error'
+                })
+
+            # Low confidence category
+            confidence = txn.get('category_confidence', 0)
+            if confidence < 0.6:
+                warnings.append({
+                    'type': 'low_confidence_category',
+                    'message': f'Transaction at row {i + 1} has low categorization confidence ({confidence:.2f})',
+                    'severity': 'warning'
+                })
+
+        # Check balance consistency
+        for i in range(1, len(transactions)):
+            prev_txn = transactions[i - 1]
+            curr_txn = transactions[i]
+
+            # Skip if either doesn't have balance
+            prev_balance_str = prev_txn.get('balance')
+            curr_balance_str = curr_txn.get('balance')
+
+            if not prev_balance_str or not curr_balance_str:
+                continue
+
+            try:
+                prev_balance = Decimal(str(prev_balance_str))
+                curr_balance = Decimal(str(curr_balance_str))
+                curr_amount = Decimal(str(curr_txn.get('amount', '0')))
+
+                # Calculate expected balance
+                expected_balance = prev_balance
+                if curr_txn.get('transaction_type') == 'credit':
+                    expected_balance += curr_amount
+                else:  # debit
+                    expected_balance -= curr_amount
+
+                # Check for mismatch (allow small rounding errors)
+                diff = abs(expected_balance - curr_balance)
+                if diff > Decimal('0.01'):
+                    warnings.append({
+                        'type': 'balance_mismatch',
+                        'message': f'Balance mismatch at row {i + 1}: expected {expected_balance}, got {curr_balance}',
+                        'severity': 'warning'
+                    })
+
+            except (InvalidOperation, ValueError) as e:
+                # If we can't parse the numbers, skip this check
+                logger.warning(f"Error checking balance consistency: {str(e)}")
+                continue
+
+        return warnings

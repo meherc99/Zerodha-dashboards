@@ -237,3 +237,203 @@ class BankStatementService:
             db.session.rollback()
             logger.error(f"Error deleting statement: {str(e)}")
             raise RuntimeError(f"Failed to delete statement: {str(e)}")
+
+    @staticmethod
+    def get_statement_preview(statement_id: int, user_id: int):
+        """
+        Get statement preview with parsed transactions for review.
+
+        Args:
+            statement_id: ID of the statement
+            user_id: ID of the user (for ownership verification)
+
+        Returns:
+            dict: Preview data with statement, transactions, and validation warnings
+
+        Raises:
+            ValueError: If statement not found, doesn't belong to user, or not ready for review
+        """
+        from app.models.transaction_category import TransactionCategory
+        from app.services.transaction_categorization_service import TransactionCategorizationService
+        from decimal import Decimal
+
+        # Get statement with join to verify ownership
+        statement = db.session.query(BankStatement).join(BankAccount).filter(
+            BankStatement.id == statement_id,
+            BankAccount.user_id == user_id
+        ).first()
+
+        if not statement:
+            raise ValueError('Statement not found')
+
+        # Check if statement is ready for review
+        if statement.status != 'review':
+            raise ValueError(f'Statement is not ready for review (current status: {statement.status})')
+
+        if not statement.parsed_data:
+            raise ValueError('Statement has no parsed data')
+
+        # Get parsed data
+        parsed_data = statement.parsed_data
+        transactions = parsed_data.get('transactions', [])
+
+        # Auto-categorize transactions
+        categorized_transactions = []
+        for txn in transactions:
+            # Convert string amounts to Decimal for categorization
+            amount = Decimal(txn.get('amount', '0'))
+            description = txn.get('description', '')
+
+            # Get category
+            category_id, confidence = TransactionCategorizationService.auto_categorize(
+                description, amount
+            )
+
+            # Build categorized transaction
+            categorized_txn = {
+                'date': txn.get('date'),
+                'description': description,
+                'amount': txn.get('amount'),
+                'transaction_type': txn.get('transaction_type'),
+                'balance': txn.get('balance'),
+                'category_id': category_id,
+                'category_confidence': confidence
+            }
+
+            categorized_transactions.append(categorized_txn)
+
+        # Get validation warnings
+        from app.services.pdf_parser_service import PDFParserService
+        validation_warnings = PDFParserService.get_validation_warnings(categorized_transactions)
+
+        # Build preview response
+        preview = {
+            'statement': {
+                'id': statement.id,
+                'bank_account_id': statement.bank_account_id,
+                'status': statement.status,
+                'statement_period_start': (statement.statement_period_start.isoformat()
+                                          if statement.statement_period_start else None),
+                'statement_period_end': (statement.statement_period_end.isoformat()
+                                        if statement.statement_period_end else None),
+                'upload_date': statement.upload_date.isoformat() if statement.upload_date else None
+            },
+            'transactions': categorized_transactions,
+            'validation_warnings': validation_warnings
+        }
+
+        return preview
+
+    @staticmethod
+    def approve_statement(statement_id: int, transactions: list, user_id: int):
+        """
+        Approve statement and save transactions to database.
+
+        Args:
+            statement_id: ID of the statement
+            transactions: List of transaction dicts to save
+            user_id: ID of the user (for ownership verification)
+
+        Returns:
+            dict: Result with transaction count and IDs
+
+        Raises:
+            ValueError: If statement not found, doesn't belong to user, or validation fails
+            RuntimeError: If database operation fails
+        """
+        from app.models.transaction import Transaction
+        from decimal import Decimal
+
+        # Get statement with join to verify ownership
+        statement = db.session.query(BankStatement).join(BankAccount).filter(
+            BankStatement.id == statement_id,
+            BankAccount.user_id == user_id
+        ).first()
+
+        if not statement:
+            raise ValueError('Statement not found')
+
+        # Verify statement is in review status
+        if statement.status != 'review':
+            raise ValueError(f'Statement cannot be approved (current status: {statement.status})')
+
+        # Validate transactions list
+        if not transactions or len(transactions) == 0:
+            raise ValueError('No transactions provided')
+
+        # Validate each transaction has required fields
+        required_fields = ['transaction_date', 'description', 'amount', 'transaction_type']
+        for i, txn in enumerate(transactions):
+            for field in required_fields:
+                if field not in txn or txn[field] is None:
+                    raise ValueError(f'Transaction {i + 1} is missing required field: {field}')
+
+            # Validate transaction_type
+            if txn['transaction_type'] not in ['credit', 'debit']:
+                raise ValueError(f'Transaction {i + 1} has invalid transaction_type')
+
+        try:
+            # Get bank account
+            bank_account = BankAccount.query.get(statement.bank_account_id)
+            if not bank_account:
+                raise ValueError('Bank account not found')
+
+            # Create Transaction records
+            created_transactions = []
+            last_balance = None
+
+            for txn_data in transactions:
+                # Parse date
+                txn_date = datetime.strptime(txn_data['transaction_date'], '%Y-%m-%d').date()
+
+                # Create transaction
+                transaction = Transaction(
+                    statement_id=statement.id,
+                    bank_account_id=statement.bank_account_id,
+                    transaction_date=txn_date,
+                    description=txn_data['description'],
+                    amount=Decimal(str(txn_data['amount'])),
+                    transaction_type=txn_data['transaction_type'],
+                    running_balance=(Decimal(str(txn_data['running_balance']))
+                                   if txn_data.get('running_balance') is not None else None),
+                    category_id=txn_data.get('category_id'),
+                    category_confidence=txn_data.get('category_confidence'),
+                    notes=txn_data.get('notes'),
+                    verified=False
+                )
+
+                db.session.add(transaction)
+                created_transactions.append(transaction)
+
+                # Track last balance
+                if transaction.running_balance is not None:
+                    last_balance = transaction.running_balance
+
+            # Flush to get transaction IDs
+            db.session.flush()
+
+            # Update bank account with last balance and statement date
+            if last_balance is not None:
+                bank_account.current_balance = last_balance
+
+            bank_account.last_statement_date = statement.statement_period_end
+
+            # Update statement status to approved
+            statement.status = 'approved'
+
+            # Commit all changes
+            db.session.commit()
+
+            logger.info(
+                f"Approved statement {statement_id}, created {len(created_transactions)} transactions"
+            )
+
+            return {
+                'transaction_count': len(created_transactions),
+                'transaction_ids': [txn.id for txn in created_transactions]
+            }
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error approving statement: {str(e)}")
+            raise RuntimeError(f"Failed to approve statement: {str(e)}")

@@ -7,6 +7,7 @@ import json
 import os
 import io
 from datetime import date
+from decimal import Decimal
 from app.models.bank_statement import BankStatement
 from app.database import db
 
@@ -397,5 +398,461 @@ class TestDeleteStatement:
             stmt_id = stmt.id
 
         response = client.delete(f'/api/statements/{stmt_id}')
+
+        assert response.status_code == 401
+
+
+class TestStatementPreview:
+    """Tests for GET /api/statements/:id/preview endpoint"""
+
+    def test_get_preview_success(self, client, auth_headers, sample_bank_account, app):
+        """Test getting preview of a parsed statement ready for review"""
+        with app.app_context():
+            # Create statement with parsed data
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={
+                    'bank_name': 'HDFC Bank',
+                    'transactions': [
+                        {
+                            'date': '2024-01-15',
+                            'description': 'BigBasket Online',
+                            'amount': '2500.00',
+                            'transaction_type': 'debit',
+                            'balance': '15000.00'
+                        },
+                        {
+                            'date': '2024-01-20',
+                            'description': 'Salary Credit',
+                            'amount': '50000.00',
+                            'transaction_type': 'credit',
+                            'balance': '65000.00'
+                        }
+                    ],
+                    'is_valid': True,
+                    'validation_errors': []
+                }
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        response = client.get(
+            f'/api/statements/{stmt_id}/preview',
+            headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+
+        # Check statement details
+        assert 'statement' in data
+        assert data['statement']['id'] == stmt_id
+        assert data['statement']['status'] == 'review'
+        assert data['statement']['bank_account_id'] == sample_bank_account['id']
+
+        # Check transactions with categorization
+        assert 'transactions' in data
+        assert len(data['transactions']) == 2
+
+        # Each transaction should have category_id and category_confidence
+        for txn in data['transactions']:
+            assert 'date' in txn
+            assert 'description' in txn
+            assert 'amount' in txn
+            assert 'transaction_type' in txn
+            assert 'balance' in txn
+            assert 'category_id' in txn
+            assert 'category_confidence' in txn
+
+        # Check validation warnings
+        assert 'validation_warnings' in data
+        assert isinstance(data['validation_warnings'], list)
+
+    def test_get_preview_with_warnings(self, client, auth_headers, sample_bank_account, app):
+        """Test preview with validation warnings"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={
+                    'bank_name': 'HDFC Bank',
+                    'transactions': [
+                        {
+                            'date': '2024-01-15',
+                            'description': 'Transaction',
+                            'amount': '1000.00',
+                            'transaction_type': 'debit',
+                            'balance': '10000.00'
+                        },
+                        {
+                            'date': '2024-01-16',
+                            'description': 'Another Transaction',
+                            'amount': '500.00',
+                            'transaction_type': 'debit',
+                            'balance': '9000.00'  # Mismatch - should be 9500.00
+                        }
+                    ],
+                    'is_valid': False,
+                    'validation_errors': ['Balance mismatch at row 2']
+                }
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        response = client.get(
+            f'/api/statements/{stmt_id}/preview',
+            headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+
+        assert len(data['validation_warnings']) > 0
+        # Should have at least the balance mismatch warning
+        assert any('balance' in str(w).lower() for w in data['validation_warnings'])
+
+    def test_get_preview_not_ready_status(self, client, auth_headers, sample_bank_account, app):
+        """Test preview with statement not in review status"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='uploaded'  # Not ready for review
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        response = client.get(
+            f'/api/statements/{stmt_id}/preview',
+            headers=auth_headers
+        )
+
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_get_preview_nonexistent(self, client, auth_headers):
+        """Test preview for non-existent statement"""
+        response = client.get(
+            '/api/statements/99999/preview',
+            headers=auth_headers
+        )
+
+        assert response.status_code == 404
+
+    def test_get_preview_other_user_statement(self, client, auth_headers,
+                                             other_user_bank_account, app):
+        """Test preview for another user's statement"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=other_user_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={'transactions': []}
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        response = client.get(
+            f'/api/statements/{stmt_id}/preview',
+            headers=auth_headers
+        )
+
+        assert response.status_code == 404
+
+    def test_get_preview_requires_auth(self, client, sample_bank_account, app):
+        """Test preview requires authentication"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={'transactions': []}
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        response = client.get(f'/api/statements/{stmt_id}/preview')
+
+        assert response.status_code == 401
+
+
+class TestApproveStatement:
+    """Tests for POST /api/statements/:id/approve endpoint"""
+
+    def test_approve_statement_success(self, client, auth_headers, sample_bank_account, app):
+        """Test successful statement approval and transaction creation"""
+        from app.models.transaction import Transaction
+
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={'transactions': []}
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        # Prepare approve request
+        approve_data = {
+            'transactions': [
+                {
+                    'transaction_date': '2024-01-15',
+                    'description': 'BigBasket Online',
+                    'amount': 2500.00,
+                    'transaction_type': 'debit',
+                    'running_balance': 15000.00,
+                    'category_id': 1,
+                    'notes': 'Weekly groceries'
+                },
+                {
+                    'transaction_date': '2024-01-20',
+                    'description': 'Salary Credit',
+                    'amount': 50000.00,
+                    'transaction_type': 'credit',
+                    'running_balance': 65000.00,
+                    'category_id': 2
+                }
+            ]
+        }
+
+        response = client.post(
+            f'/api/statements/{stmt_id}/approve',
+            json=approve_data,
+            headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+
+        assert 'message' in data
+        assert 'transaction_count' in data
+        assert data['transaction_count'] == 2
+        assert 'transaction_ids' in data
+        assert len(data['transaction_ids']) == 2
+
+        # Verify transactions were created
+        with app.app_context():
+            transactions = Transaction.query.filter_by(statement_id=stmt_id).all()
+            assert len(transactions) == 2
+
+            # Verify transaction details
+            txn1 = transactions[0]
+            assert txn1.bank_account_id == sample_bank_account['id']
+            assert txn1.description == 'BigBasket Online'
+            assert txn1.amount == Decimal('2500.00')
+            assert txn1.transaction_type == 'debit'
+            assert txn1.running_balance == Decimal('15000.00')
+            assert txn1.category_id == 1
+
+            # Verify statement status updated
+            stmt = BankStatement.query.get(stmt_id)
+            assert stmt.status == 'approved'
+
+            # Verify bank account balance updated
+            from app.models.bank_account import BankAccount
+            account = BankAccount.query.get(sample_bank_account['id'])
+            assert account.current_balance == Decimal('65000.00')  # Last transaction balance
+            assert account.last_statement_date == date(2024, 1, 31)
+
+    def test_approve_statement_empty_transactions(self, client, auth_headers,
+                                                  sample_bank_account, app):
+        """Test approval with no transactions should fail"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={'transactions': []}
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        approve_data = {'transactions': []}
+
+        response = client.post(
+            f'/api/statements/{stmt_id}/approve',
+            json=approve_data,
+            headers=auth_headers
+        )
+
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_approve_statement_invalid_data(self, client, auth_headers,
+                                           sample_bank_account, app):
+        """Test approval with missing required fields"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={'transactions': []}
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        # Missing required fields
+        approve_data = {
+            'transactions': [
+                {
+                    'description': 'Test',
+                    # Missing transaction_date, amount, transaction_type
+                }
+            ]
+        }
+
+        response = client.post(
+            f'/api/statements/{stmt_id}/approve',
+            json=approve_data,
+            headers=auth_headers
+        )
+
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_approve_statement_wrong_status(self, client, auth_headers,
+                                           sample_bank_account, app):
+        """Test approval when statement is not in review status"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='uploaded'  # Wrong status
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        approve_data = {
+            'transactions': [
+                {
+                    'transaction_date': '2024-01-15',
+                    'description': 'Test',
+                    'amount': 100.00,
+                    'transaction_type': 'debit',
+                    'running_balance': 1000.00
+                }
+            ]
+        }
+
+        response = client.post(
+            f'/api/statements/{stmt_id}/approve',
+            json=approve_data,
+            headers=auth_headers
+        )
+
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_approve_statement_nonexistent(self, client, auth_headers):
+        """Test approval for non-existent statement"""
+        approve_data = {
+            'transactions': [
+                {
+                    'transaction_date': '2024-01-15',
+                    'description': 'Test',
+                    'amount': 100.00,
+                    'transaction_type': 'debit',
+                    'running_balance': 1000.00
+                }
+            ]
+        }
+
+        response = client.post(
+            '/api/statements/99999/approve',
+            json=approve_data,
+            headers=auth_headers
+        )
+
+        assert response.status_code == 404
+
+    def test_approve_statement_other_user(self, client, auth_headers,
+                                         other_user_bank_account, app):
+        """Test approval for another user's statement"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=other_user_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={'transactions': []}
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        approve_data = {
+            'transactions': [
+                {
+                    'transaction_date': '2024-01-15',
+                    'description': 'Test',
+                    'amount': 100.00,
+                    'transaction_type': 'debit',
+                    'running_balance': 1000.00
+                }
+            ]
+        }
+
+        response = client.post(
+            f'/api/statements/{stmt_id}/approve',
+            json=approve_data,
+            headers=auth_headers
+        )
+
+        assert response.status_code == 404
+
+    def test_approve_statement_requires_auth(self, client, sample_bank_account, app):
+        """Test approval requires authentication"""
+        with app.app_context():
+            stmt = BankStatement(
+                bank_account_id=sample_bank_account['id'],
+                statement_period_start=date(2024, 1, 1),
+                statement_period_end=date(2024, 1, 31),
+                pdf_file_path='/path/to/file.pdf',
+                status='review',
+                parsed_data={'transactions': []}
+            )
+            db.session.add(stmt)
+            db.session.commit()
+            stmt_id = stmt.id
+
+        approve_data = {'transactions': []}
+
+        response = client.post(f'/api/statements/{stmt_id}/approve', json=approve_data)
 
         assert response.status_code == 401

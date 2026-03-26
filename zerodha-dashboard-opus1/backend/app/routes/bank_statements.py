@@ -196,3 +196,129 @@ def delete_statement(statement_id):
     except Exception as e:
         logger.error(f"Unexpected error deleting statement: {str(e)}")
         return jsonify({'error': 'Failed to delete statement'}), 500
+
+
+@bank_statements_bp.route('/statements/<int:statement_id>/preview', methods=['GET'])
+@jwt_required()
+def get_statement_preview(statement_id):
+    """
+    Get parsed statement data for review before approval.
+
+    Args:
+        statement_id: Statement ID
+
+    Requires:
+        - JWT token in Authorization header
+
+    Returns:
+        200: Preview data with statement, transactions (with auto-categorization), and validation warnings
+        400: {"error": "error message"} - Statement not ready for review
+        404: {"error": "Statement not found"} - Statement doesn't exist or wrong user
+        401: Unauthorized
+        500: {"error": "error message"} - Server error
+    """
+    user_id = int(get_jwt_identity())
+
+    try:
+        preview = BankStatementService.get_statement_preview(
+            statement_id=statement_id,
+            user_id=user_id
+        )
+
+        return jsonify(preview), 200
+
+    except ValueError as e:
+        # Statement not found or not ready for review
+        error_msg = str(e)
+        if 'not found' in error_msg.lower():
+            return jsonify({'error': error_msg}), 404
+        else:
+            return jsonify({'error': error_msg}), 400
+
+    except Exception as e:
+        logger.error(f"Error getting statement preview: {str(e)}")
+        return jsonify({'error': 'Failed to get statement preview'}), 500
+
+
+@bank_statements_bp.route('/statements/<int:statement_id>/approve', methods=['POST'])
+@jwt_required()
+def approve_statement(statement_id):
+    """
+    Approve statement and save transactions to database.
+
+    Args:
+        statement_id: Statement ID
+
+    Requires:
+        - JWT token in Authorization header
+        - JSON body with 'transactions' array
+
+    Request Body:
+        {
+            "transactions": [
+                {
+                    "transaction_date": "2024-01-15",
+                    "description": "BigBasket Online",
+                    "amount": 2500.00,
+                    "transaction_type": "debit",
+                    "running_balance": 15000.00,
+                    "category_id": 4,
+                    "notes": "Weekly groceries"  # optional
+                }
+            ]
+        }
+
+    Returns:
+        200: {"message": str, "transaction_count": int, "transaction_ids": [int]}
+        400: {"error": "error message"} - Validation errors
+        404: {"error": "Statement not found"} - Statement doesn't exist or wrong user
+        401: Unauthorized
+        500: {"error": "error message"} - Server error
+    """
+    user_id = int(get_jwt_identity())
+
+    # Get JSON data
+    if not request.is_json:
+        return jsonify({'error': 'Content-Type must be application/json'}), 400
+
+    data = request.get_json()
+
+    # Validate request body
+    if 'transactions' not in data:
+        return jsonify({'error': 'Missing transactions field'}), 400
+
+    transactions = data['transactions']
+
+    try:
+        result = BankStatementService.approve_statement(
+            statement_id=statement_id,
+            transactions=transactions,
+            user_id=user_id
+        )
+
+        logger.info(
+            f"User {user_id} approved statement {statement_id} "
+            f"with {result['transaction_count']} transactions"
+        )
+
+        return jsonify({
+            'message': 'Statement approved successfully',
+            'transaction_count': result['transaction_count'],
+            'transaction_ids': result['transaction_ids']
+        }), 200
+
+    except ValueError as e:
+        # Validation errors or statement not found
+        error_msg = str(e)
+        if 'not found' in error_msg.lower():
+            return jsonify({'error': error_msg}), 404
+        else:
+            return jsonify({'error': error_msg}), 400
+
+    except RuntimeError as e:
+        logger.error(f"Runtime error approving statement: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error approving statement: {str(e)}")
+        return jsonify({'error': 'Failed to approve statement'}), 500
