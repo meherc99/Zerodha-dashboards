@@ -52,3 +52,7 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Uploaded bank statement PDFs
+uploads/bank_statements/*
+!uploads/bank_statements/.gitkeep
