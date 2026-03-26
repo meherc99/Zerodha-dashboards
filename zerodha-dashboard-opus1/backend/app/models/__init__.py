@@ -7,6 +7,7 @@ from app.models.snapshot import Snapshot, PortfolioTimeseries, SectorAllocation
 from app.models.historical_price import HistoricalPrice
 from app.models.user import User
 from app.models.bank_account import BankAccount
+from app.models.transaction_category import TransactionCategory
 
 __all__ = [
     'Account',
@@ -16,5 +17,6 @@ __all__ = [
     'SectorAllocation',
     'HistoricalPrice',
     'User',
-    'BankAccount'
+    'BankAccount',
+    'TransactionCategory'
 ]
