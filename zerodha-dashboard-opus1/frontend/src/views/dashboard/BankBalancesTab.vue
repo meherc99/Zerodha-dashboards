@@ -1,5 +1,9 @@
 <template>
   <div class="bank-balances-tab">
+    <!-- Modals -->
+    <BankUploadModal />
+    <StatementReviewModal />
+
     <!-- Total Balance Section -->
     <div class="total-balance-card">
       <div class="total-info">
@@ -53,6 +57,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useBankAccountsStore } from '@/stores/bankAccounts'
 import { useUiStore } from '@/stores/ui'
 import BankCard from '@/components/bank/BankCard.vue'
+import BankUploadModal from '@/components/bank/BankUploadModal.vue'
+import StatementReviewModal from '@/components/bank/StatementReviewModal.vue'
 
 const bankAccountsStore = useBankAccountsStore()
 const uiStore = useUiStore()
@@ -86,11 +92,7 @@ const handleBankSelect = (bank) => {
 }
 
 const handleStatementUpload = (bank) => {
-  // Placeholder for statement upload functionality
-  uiStore.addNotification({
-    type: 'info',
-    message: `Statement upload for ${bank.bank_name} - Coming soon!`
-  })
+  bankAccountsStore.openUploadModal(bank.id)
 }
 
 const showAddBankModal = () => {

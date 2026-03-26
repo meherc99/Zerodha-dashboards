@@ -166,4 +166,34 @@ export const api = {
   deleteBankAccount(accountId) {
     return apiClient.delete(`/bank-accounts/${accountId}`)
   },
+
+  // Bank Statements
+  uploadStatement(accountId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    return apiClient.post(`/bank-accounts/${accountId}/statements/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 60000  // Longer timeout for file upload + parsing
+    })
+  },
+
+  getStatement(statementId) {
+    return apiClient.get(`/statements/${statementId}`)
+  },
+
+  getStatementPreview(statementId) {
+    return apiClient.get(`/statements/${statementId}/preview`)
+  },
+
+  approveStatement(statementId, transactions) {
+    return apiClient.post(`/statements/${statementId}/approve`, { transactions })
+  },
+
+  // Categories
+  getCategories() {
+    return apiClient.get('/categories')
+  },
 }

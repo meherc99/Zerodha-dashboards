@@ -43,7 +43,7 @@ def create_app(config_name=None):
     init_db(app)
 
     # Register blueprints
-    from app.routes import health_bp, accounts_bp, holdings_bp, analytics_bp, auth_bp
+    from app.routes import health_bp, accounts_bp, holdings_bp, analytics_bp, auth_bp, categories_bp
     from app.routes.bank_accounts import bank_accounts_bp
     from app.routes.bank_statements import bank_statements_bp
 
@@ -54,6 +54,7 @@ def create_app(config_name=None):
     app.register_blueprint(auth_bp)
     app.register_blueprint(bank_accounts_bp)
     app.register_blueprint(bank_statements_bp)
+    app.register_blueprint(categories_bp)
 
     # Initialize scheduler
     scheduler = SchedulerService()
