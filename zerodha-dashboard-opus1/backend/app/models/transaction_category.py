@@ -26,8 +26,8 @@ class TransactionCategory(db.Model):
         cascade='all, delete-orphan'
     )
 
-    # Forward reference to Transaction model (will be created later)
-    # transactions = db.relationship('Transaction', back_populates='category')
+    # Relationship to transactions
+    transactions = db.relationship('Transaction', back_populates='category')
 
     def __repr__(self):
         return f'<TransactionCategory {self.name}>'
