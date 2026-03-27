@@ -10,6 +10,7 @@ from app.models.bank_account import BankAccount
 from app.models.transaction_category import TransactionCategory
 from app.models.bank_statement import BankStatement
 from app.models.transaction import Transaction
+from app.models.parsing_template import ParsingTemplate
 
 __all__ = [
     'Account',
@@ -22,5 +23,6 @@ __all__ = [
     'BankAccount',
     'TransactionCategory',
     'BankStatement',
-    'Transaction'
+    'Transaction',
+    'ParsingTemplate'
 ]

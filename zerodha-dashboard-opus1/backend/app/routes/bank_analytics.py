@@ -21,7 +21,7 @@ def get_balance_trend(bank_account_id):
         200: {dates: [...], balances: [...], period_days: 30}
         404: Account not found or not owned by user
     """
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     days = request.args.get('days', default=30, type=int)
 
     result = BankAnalyticsService.get_balance_trend(bank_account_id, days, user_id)
@@ -45,7 +45,7 @@ def get_category_breakdown(bank_account_id):
         200: {categories: [...], total_spending: 58800.00, period_days: 30}
         404: Account not found or not owned by user
     """
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     period_days = request.args.get('period_days', default=30, type=int)
 
     result = BankAnalyticsService.get_category_breakdown(
@@ -71,7 +71,7 @@ def get_cashflow_analysis(bank_account_id):
         200: {periods: [...], credits: [...], debits: [...], net: [...], period_days: 30}
         404: Account not found or not owned by user
     """
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     period_days = request.args.get('period_days', default=30, type=int)
 
     result = BankAnalyticsService.get_cashflow_analysis(
@@ -97,7 +97,7 @@ def get_top_merchants(bank_account_id):
         200: {merchants: [{merchant, total, count, avg_transaction}, ...], limit: 10}
         404: Account not found or not owned by user
     """
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     limit = request.args.get('limit', default=10, type=int)
 
     result = BankAnalyticsService.get_top_merchants(

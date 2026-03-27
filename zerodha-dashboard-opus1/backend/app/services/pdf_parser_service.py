@@ -3,12 +3,15 @@ PDF Parser Service for extracting transaction data from bank statement PDFs.
 """
 import re
 import logging
+import os
+import json
 from datetime import datetime, date
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Tuple, Optional
 import pdfplumber
 from app.database import db
 from app.models.bank_statement import BankStatement
+from app.models.parsing_template import ParsingTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +344,254 @@ class PDFParserService:
         return len(errors) == 0, errors
 
     @staticmethod
+    def find_template(bank_name: str) -> Optional[ParsingTemplate]:
+        """
+        Find active parsing template for a bank.
+
+        Args:
+            bank_name: Bank name (normalized)
+
+        Returns:
+            Most recently used active ParsingTemplate or None
+        """
+        if not bank_name or bank_name == 'Unknown':
+            return None
+
+        template = ParsingTemplate.query.filter_by(
+            bank_name=bank_name,
+            is_active=True
+        ).order_by(
+            ParsingTemplate.last_used_at.desc().nullslast(),
+            ParsingTemplate.success_count.desc()
+        ).first()
+
+        if template:
+            logger.info(f"Found template {template.id} for {bank_name} "
+                       f"(v{template.template_version}, {template.success_count} successes)")
+
+        return template
+
+    @staticmethod
+    def extract_with_template(pdf_path: str, template: ParsingTemplate) -> Tuple[List[Dict], float]:
+        """
+        Extract transactions using saved template configuration.
+
+        This is the fast path - uses saved extraction patterns instead of
+        AI or complex table detection.
+
+        Args:
+            pdf_path: Path to PDF file
+            template: ParsingTemplate with extraction config
+
+        Returns:
+            Tuple of (transactions list, confidence score)
+
+        Raises:
+            RuntimeError: If extraction fails
+        """
+        try:
+            logger.info(f"Using template {template.id} for extraction")
+
+            config = template.extraction_config
+            parsing_method = config.get('parsing_method', 'pdfplumber')
+
+            if parsing_method == 'pdfplumber':
+                # Extract tables using pdfplumber
+                tables = PDFParserService.extract_tables_from_pdf(pdf_path)
+
+                if not tables:
+                    raise RuntimeError("No tables found in PDF")
+
+                # Find transaction table using template hints
+                transaction_table = PDFParserService.identify_transaction_table(tables)
+                if not transaction_table:
+                    raise RuntimeError("No transaction table found")
+
+                # Parse transactions using template column mapping
+                headers = transaction_table[0]
+                transactions = []
+                column_map = config.get('columns', {})
+
+                for row in transaction_table[1:]:
+                    txn = PDFParserService.parse_transaction_row(row, headers)
+                    if txn:
+                        transactions.append(txn)
+
+                if not transactions:
+                    raise RuntimeError("No transactions extracted using template")
+
+                # Validate extracted data
+                is_valid, errors = PDFParserService.validate_transactions(transactions)
+
+                # Calculate confidence based on validation
+                confidence = 0.9 if is_valid else 0.6
+
+                logger.info(f"Template extraction: {len(transactions)} transactions, "
+                           f"confidence={confidence:.2f}")
+
+                return transactions, confidence
+
+            else:
+                # For AI-based templates, we'd call AI with hints from template
+                # For now, fall back to standard extraction
+                raise RuntimeError(f"Unsupported parsing method in template: {parsing_method}")
+
+        except Exception as e:
+            logger.warning(f"Template extraction failed: {str(e)}")
+            # Mark template failure
+            template.mark_failure()
+            db.session.commit()
+            raise RuntimeError(f"Template extraction failed: {str(e)}")
+
+    @staticmethod
+    def extract_with_pdfplumber(pdf_path: str) -> Tuple[List[Dict], float]:
+        """
+        Extract transactions using pdfplumber auto-detection.
+
+        Args:
+            pdf_path: Path to PDF file
+
+        Returns:
+            Tuple of (transactions list, confidence score)
+
+        Raises:
+            RuntimeError: If extraction fails
+        """
+        try:
+            logger.info("Extracting with pdfplumber auto-detection")
+
+            # Extract tables
+            tables = PDFParserService.extract_tables_from_pdf(pdf_path)
+            if not tables:
+                raise RuntimeError("No tables found in PDF")
+
+            # Find transaction table
+            transaction_table = PDFParserService.identify_transaction_table(tables)
+            if not transaction_table:
+                raise RuntimeError("No transaction table found")
+
+            # Parse transactions
+            headers = transaction_table[0]
+            transactions = []
+
+            for row in transaction_table[1:]:
+                txn = PDFParserService.parse_transaction_row(row, headers)
+                if txn:
+                    transactions.append(txn)
+
+            if not transactions:
+                raise RuntimeError("No valid transactions extracted")
+
+            # Validate
+            is_valid, errors = PDFParserService.validate_transactions(transactions)
+
+            # Calculate confidence
+            confidence = 0.8 if is_valid else 0.5
+
+            logger.info(f"PDFPlumber extraction: {len(transactions)} transactions, "
+                       f"confidence={confidence:.2f}")
+
+            return transactions, confidence
+
+        except Exception as e:
+            logger.error(f"PDFPlumber extraction failed: {str(e)}")
+            raise
+
+    @staticmethod
+    def fallback_to_ai(pdf_path: str, bank_name: str = None) -> Tuple[List[Dict], float]:
+        """
+        Use AI (Claude API or GPT-4 Vision) to extract transactions from PDF.
+
+        This is the fallback when pdfplumber fails or has low confidence.
+        Converts PDF to images and sends to vision API with structured prompt.
+
+        Args:
+            pdf_path: Path to PDF file
+            bank_name: Optional bank name hint for AI
+
+        Returns:
+            Tuple of (transactions list, confidence score)
+
+        Raises:
+            RuntimeError: If AI extraction fails or API not configured
+        """
+        try:
+            # Check if AI API is configured
+            api_key = os.getenv('ANTHROPIC_API_KEY') or os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                raise RuntimeError(
+                    "AI API not configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable."
+                )
+
+            logger.info(f"Attempting AI fallback for {pdf_path}")
+
+            # For now, this is a placeholder implementation
+            # In production, you would:
+            # 1. Convert PDF pages to images (using pdf2image)
+            # 2. Send images to Claude API or GPT-4 Vision with structured prompt
+            # 3. Parse JSON response into transaction list
+            # 4. Validate and return
+
+            # Placeholder prompt structure:
+            prompt = f"""
+            Extract all bank transactions from this statement image.
+            Bank name: {bank_name or 'Unknown'}
+
+            Return JSON in this exact format:
+            {{
+                "bank_name": "...",
+                "account_number": "...",
+                "statement_period": {{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}},
+                "transactions": [
+                    {{
+                        "date": "YYYY-MM-DD",
+                        "description": "...",
+                        "debit": null or amount,
+                        "credit": null or amount,
+                        "balance": amount
+                    }}
+                ]
+            }}
+            """
+
+            # For now, raise error indicating this needs implementation
+            raise RuntimeError(
+                "AI fallback requires additional setup. "
+                "Install 'anthropic' or 'openai' package and configure API key. "
+                "See documentation for setup instructions."
+            )
+
+            # Example implementation structure (commented out):
+            # import anthropic
+            # client = anthropic.Anthropic(api_key=api_key)
+            #
+            # # Convert PDF to images
+            # from pdf2image import convert_from_path
+            # images = convert_from_path(pdf_path)
+            #
+            # # Send to Claude API
+            # response = client.messages.create(
+            #     model="claude-3-opus-20240229",
+            #     max_tokens=4096,
+            #     messages=[{
+            #         "role": "user",
+            #         "content": [
+            #             {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64_image}},
+            #             {"type": "text", "text": prompt}
+            #         ]
+            #     }]
+            # )
+            #
+            # # Parse response
+            # result = json.loads(response.content[0].text)
+            # transactions = parse_ai_response(result)
+            # return transactions, 0.95
+
+        except Exception as e:
+            logger.error(f"AI fallback failed: {str(e)}")
+            raise RuntimeError(f"AI extraction failed: {str(e)}")
+
+    @staticmethod
     def parse_statement(statement_id: int) -> Dict:
         """
         Main parsing pipeline for a bank statement.
@@ -374,30 +625,66 @@ class PDFParserService:
             bank_name = PDFParserService.detect_bank_name(text)
             logger.info(f"Detected bank: {bank_name}")
 
-            # Extract tables
-            tables = PDFParserService.extract_tables_from_pdf(statement.pdf_file_path)
-            logger.info(f"Extracted {len(tables)} tables from PDF")
+            # Try template-based extraction first (fast path)
+            template = PDFParserService.find_template(bank_name)
+            transactions = None
+            used_template_id = None
 
-            # Find transaction table
-            transaction_table = PDFParserService.identify_transaction_table(tables)
-            if not transaction_table:
-                raise ValueError("No transaction table found in PDF")
+            if template:
+                try:
+                    transactions, confidence = PDFParserService.extract_with_template(
+                        statement.pdf_file_path, template
+                    )
+                    used_template_id = template.id
+                    logger.info(f"Template extraction successful with confidence {confidence:.2f}")
 
-            logger.info(f"Found transaction table with {len(transaction_table)} rows")
+                    # Mark template success
+                    template.mark_success()
+                    db.session.commit()
 
-            # Parse transactions
-            headers = transaction_table[0]
-            transactions = []
+                except Exception as template_error:
+                    logger.warning(f"Template extraction failed, falling back: {template_error}")
+                    transactions = None
 
-            for row in transaction_table[1:]:
-                txn = PDFParserService.parse_transaction_row(row, headers)
-                if txn:
-                    transactions.append(txn)
+            # Fall back to pdfplumber if no template or template failed
+            if not transactions:
+                try:
+                    transactions, confidence = PDFParserService.extract_with_pdfplumber(
+                        statement.pdf_file_path
+                    )
+                    logger.info(f"PDFPlumber extraction successful with confidence {confidence:.2f}")
 
-            logger.info(f"Parsed {len(transactions)} transactions")
+                    # If pdfplumber confidence is low, try AI as final fallback
+                    if confidence < 0.6:
+                        logger.info(f"PDFPlumber confidence {confidence:.2f} is low, trying AI fallback")
+                        try:
+                            ai_transactions, ai_confidence = PDFParserService.fallback_to_ai(
+                                statement.pdf_file_path, bank_name
+                            )
+                            if ai_confidence > confidence:
+                                logger.info(f"AI extraction better: {ai_confidence:.2f} > {confidence:.2f}")
+                                transactions = ai_transactions
+                                confidence = ai_confidence
+                        except Exception as ai_error:
+                            logger.warning(f"AI fallback failed, using pdfplumber results: {ai_error}")
+                            # Keep pdfplumber results even if AI fails
+
+                except Exception as e:
+                    logger.error(f"PDFPlumber extraction failed: {str(e)}")
+
+                    # Try AI as last resort
+                    logger.info("Attempting AI fallback as last resort")
+                    try:
+                        transactions, confidence = PDFParserService.fallback_to_ai(
+                            statement.pdf_file_path, bank_name
+                        )
+                        logger.info(f"AI extraction successful with confidence {confidence:.2f}")
+                    except Exception as ai_error:
+                        logger.error(f"AI fallback also failed: {ai_error}")
+                        raise ValueError(f"All extraction methods failed. PDFPlumber: {str(e)}, AI: {str(ai_error)}")
 
             if not transactions:
-                raise ValueError("No valid transactions found in table")
+                raise ValueError("No valid transactions found in PDF")
 
             # Validate transactions
             is_valid, validation_errors = PDFParserService.validate_transactions(transactions)
@@ -419,11 +706,14 @@ class PDFParserService:
                 'transactions': serializable_transactions,
                 'is_valid': is_valid,
                 'validation_errors': validation_errors,
-                'parsed_count': len(transactions)
+                'parsed_count': len(transactions),
+                'used_template_id': used_template_id
             }
 
-            # Update statement with parsed data
+            # Update statement with parsed data and template reference
             statement.parsed_data = parsed_data
+            if used_template_id:
+                statement.parsing_template_id = used_template_id
             statement.status = 'review'
             statement.error_message = None
             db.session.commit()

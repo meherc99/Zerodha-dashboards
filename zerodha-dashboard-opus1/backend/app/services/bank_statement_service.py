@@ -8,6 +8,7 @@ from werkzeug.utils import secure_filename
 from app.database import db
 from app.models.bank_statement import BankStatement
 from app.models.bank_account import BankAccount
+from app.models.parsing_template import ParsingTemplate
 from app.services.pdf_parser_service import PDFParserService
 import logging
 
@@ -428,6 +429,17 @@ class BankStatementService:
                 f"Approved statement {statement_id}, created {len(created_transactions)} transactions"
             )
 
+            # After successful approval, try to save a template for future use
+            # Only save if this statement didn't use a template (new bank or failed template)
+            if statement.parsed_data and not statement.parsing_template_id:
+                try:
+                    bank_name = statement.parsed_data.get('bank_name')
+                    if bank_name and bank_name != 'Unknown':
+                        BankStatementService.save_template(statement_id, bank_name)
+                except Exception as template_error:
+                    # Don't fail the approval if template saving fails
+                    logger.warning(f"Failed to save template for statement {statement_id}: {template_error}")
+
             return {
                 'transaction_count': len(created_transactions),
                 'transaction_ids': [txn.id for txn in created_transactions]
@@ -437,3 +449,102 @@ class BankStatementService:
             db.session.rollback()
             logger.error(f"Error approving statement: {str(e)}")
             raise RuntimeError(f"Failed to approve statement: {str(e)}")
+
+    @staticmethod
+    def save_template(statement_id: int, bank_name: str):
+        """
+        Save a parsing template from a successfully parsed statement.
+
+        This enables the incremental intelligence feature - subsequent uploads
+        from the same bank can use this template for instant parsing.
+
+        Args:
+            statement_id: ID of successfully parsed statement
+            bank_name: Normalized bank name
+
+        Returns:
+            ParsingTemplate: Created template
+
+        Raises:
+            ValueError: If statement not found or invalid
+        """
+        statement = BankStatement.query.get(statement_id)
+        if not statement:
+            raise ValueError(f"Statement not found: {statement_id}")
+
+        if statement.status != 'approved':
+            raise ValueError(f"Can only save template from approved statements (current: {statement.status})")
+
+        try:
+            # Check if template already exists for this bank
+            existing_template = ParsingTemplate.query.filter_by(
+                bank_name=bank_name,
+                is_active=True
+            ).order_by(ParsingTemplate.template_version.desc()).first()
+
+            # Determine version number
+            version = 1
+            if existing_template:
+                version = existing_template.template_version + 1
+
+            # Build extraction config from parsed data
+            # This is a simplified version - in production, we'd extract more details
+            extraction_config = {
+                'parsing_method': 'pdfplumber',  # For now, only pdfplumber templates
+                'date_format': '%Y-%m-%d',  # Could be detected from actual dates
+                'currency_symbol': '₹',
+                'saved_from_statement': statement_id,
+                'columns': {
+                    'date': 0,
+                    'description': 1,
+                    'amount': 2,
+                    'type': 3,
+                    'balance': 4
+                }
+            }
+
+            # Create new template
+            template = ParsingTemplate(
+                bank_name=bank_name,
+                template_version=version,
+                extraction_config=extraction_config,
+                created_from_statement_id=statement_id,
+                success_count=0,  # Will be incremented when used
+                failure_count=0,
+                is_active=True
+            )
+
+            db.session.add(template)
+            db.session.commit()
+
+            logger.info(f"Created parsing template {template.id} for {bank_name} "
+                       f"(v{version}) from statement {statement_id}")
+
+            return template
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error saving template: {str(e)}")
+            raise RuntimeError(f"Failed to save template: {str(e)}")
+
+    @staticmethod
+    def detect_duplicate_statement(bank_account_id: int, period_start: date, period_end: date) -> bool:
+        """
+        Check if a statement for the same period already exists.
+
+        Args:
+            bank_account_id: ID of the bank account
+            period_start: Statement period start date
+            period_end: Statement period end date
+
+        Returns:
+            bool: True if duplicate exists, False otherwise
+        """
+        existing = BankStatement.query.filter(
+            BankStatement.bank_account_id == bank_account_id,
+            BankStatement.statement_period_start == period_start,
+            BankStatement.statement_period_end == period_end,
+            BankStatement.status != 'failed'  # Ignore failed uploads
+        ).first()
+
+        return existing is not None

@@ -17,7 +17,12 @@ class BankStatement(db.Model):
     statement_period_end = db.Column(db.Date, nullable=False)
     pdf_file_path = db.Column(db.String(500), nullable=False)  # Encrypted path to uploaded PDF
     upload_date = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    parsing_template_id = db.Column(db.Integer, nullable=True)  # Forward reference - will add FK later
+    parsing_template_id = db.Column(
+        db.Integer,
+        db.ForeignKey('parsing_templates.id'),
+        nullable=True,
+        index=True
+    )
     status = db.Column(db.String(20), default='uploaded', nullable=False, index=True)
     # Status values: 'uploaded', 'parsing', 'review', 'approved', 'failed'
     error_message = db.Column(db.Text, nullable=True)
@@ -28,7 +33,11 @@ class BankStatement(db.Model):
     bank_account = db.relationship('BankAccount', back_populates='statements')
     transactions = db.relationship('Transaction', back_populates='statement',
                                    cascade='all, delete-orphan')
-    # parsing_template relationship will be added when ParsingTemplate model is created
+    parsing_template = db.relationship(
+        'ParsingTemplate',
+        foreign_keys=[parsing_template_id],
+        back_populates='statements'
+    )
 
     # Indexes created in migration:
     # idx_statements_bank_account (bank_account_id)
