@@ -196,4 +196,29 @@ export const api = {
   getCategories() {
     return apiClient.get('/categories')
   },
+
+  // Bank Analytics
+  getBalanceTrend(accountId, days = 30) {
+    return apiClient.get(`/bank-accounts/${accountId}/analytics/balance-trend`, {
+      params: { days }
+    })
+  },
+
+  getCategoryBreakdown(accountId, periodDays = 30) {
+    return apiClient.get(`/bank-accounts/${accountId}/analytics/category-breakdown`, {
+      params: { period_days: periodDays }
+    })
+  },
+
+  getCashflow(accountId, periodDays = 30) {
+    return apiClient.get(`/bank-accounts/${accountId}/analytics/cashflow`, {
+      params: { period_days: periodDays }
+    })
+  },
+
+  getTopMerchants(accountId, limit = 10) {
+    return apiClient.get(`/bank-accounts/${accountId}/analytics/top-merchants`, {
+      params: { limit }
+    })
+  },
 }

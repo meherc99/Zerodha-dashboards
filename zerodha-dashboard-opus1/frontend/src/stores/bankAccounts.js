@@ -27,6 +27,15 @@ export const useBankAccountsStore = defineStore('bankAccounts', {
       loading: false,
       error: null,
     },
+    // Analytics state
+    analytics: {
+      balanceTrend: [],
+      categoryBreakdown: [],
+      cashflow: [],
+      topMerchants: [],
+      loading: false,
+      error: null,
+    },
   }),
 
   getters: {
@@ -238,6 +247,73 @@ export const useBankAccountsStore = defineStore('bankAccounts', {
       if (this.reviewModal.transactions[index]) {
         this.reviewModal.transactions[index][field] = value
       }
+    },
+
+    // Analytics actions
+    async fetchBalanceTrend(accountId, days = 30) {
+      this.analytics.loading = true
+      this.analytics.error = null
+      try {
+        const response = await api.getBalanceTrend(accountId, days)
+        this.analytics.balanceTrend = response.data.trend || []
+      } catch (error) {
+        this.analytics.error = error.response?.data?.error || 'Failed to fetch balance trend'
+        console.error('Error fetching balance trend:', error)
+      } finally {
+        this.analytics.loading = false
+      }
+    },
+
+    async fetchCategoryBreakdown(accountId, periodDays = 30) {
+      this.analytics.loading = true
+      this.analytics.error = null
+      try {
+        const response = await api.getCategoryBreakdown(accountId, periodDays)
+        this.analytics.categoryBreakdown = response.data.categories || []
+      } catch (error) {
+        this.analytics.error = error.response?.data?.error || 'Failed to fetch category breakdown'
+        console.error('Error fetching category breakdown:', error)
+      } finally {
+        this.analytics.loading = false
+      }
+    },
+
+    async fetchCashflow(accountId, periodDays = 30) {
+      this.analytics.loading = true
+      this.analytics.error = null
+      try {
+        const response = await api.getCashflow(accountId, periodDays)
+        this.analytics.cashflow = response.data.weeks || []
+      } catch (error) {
+        this.analytics.error = error.response?.data?.error || 'Failed to fetch cashflow'
+        console.error('Error fetching cashflow:', error)
+      } finally {
+        this.analytics.loading = false
+      }
+    },
+
+    async fetchTopMerchants(accountId, limit = 10) {
+      this.analytics.loading = true
+      this.analytics.error = null
+      try {
+        const response = await api.getTopMerchants(accountId, limit)
+        this.analytics.topMerchants = response.data.merchants || []
+      } catch (error) {
+        this.analytics.error = error.response?.data?.error || 'Failed to fetch top merchants'
+        console.error('Error fetching top merchants:', error)
+      } finally {
+        this.analytics.loading = false
+      }
+    },
+
+    async fetchAllAnalytics(accountId, days = 30) {
+      // Fetch all analytics data in parallel
+      await Promise.all([
+        this.fetchBalanceTrend(accountId, days),
+        this.fetchCategoryBreakdown(accountId, days),
+        this.fetchCashflow(accountId, days),
+        this.fetchTopMerchants(accountId, 10),
+      ])
     },
   },
 })
