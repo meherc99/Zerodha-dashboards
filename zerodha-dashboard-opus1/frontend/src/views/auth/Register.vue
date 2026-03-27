@@ -55,30 +55,30 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 const router = useRouter()
+const { loading, error: authError } = storeToRefs(authStore)
 
 const fullName = ref('')
 const email = ref('')
 const password = ref('')
-const loading = ref(false)
-const error = ref('')
+
+const error = computed(() => authError.value)
 
 const handleRegister = async () => {
-  loading.value = true
-  error.value = ''
+  authStore.clearError()
 
   try {
     await authStore.register(email.value, password.value, fullName.value)
     router.push('/dashboard')
   } catch (err) {
-    error.value = err.response?.data?.error || 'Registration failed. Please try again.'
-  } finally {
-    loading.value = false
+    // Error is already set in the store
+    console.error('Registration error:', err)
   }
 }
 </script>

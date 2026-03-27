@@ -16,6 +16,22 @@
           <span v-if="!holdingsStore.loading">🔄 Sync</span>
           <span v-else>Syncing...</span>
         </button>
+
+        <!-- User Menu -->
+        <div class="user-menu" @click="toggleUserMenu" ref="userMenuRef">
+          <div class="user-avatar">
+            {{ userInitials }}
+          </div>
+          <div v-if="showUserMenu" class="user-dropdown">
+            <div class="user-info">
+              <p class="user-name">{{ authStore.user?.full_name || 'User' }}</p>
+              <p class="user-email">{{ authStore.user?.email }}</p>
+            </div>
+            <button @click.stop="handleLogout" class="logout-btn">
+              🚪 Logout
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -30,24 +46,51 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useHoldingsStore } from '@/stores/holdings'
 import { useAccountsStore } from '@/stores/accounts'
 import { useUiStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import { format } from 'date-fns'
 
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import AccountSelector from '@/components/dashboard/AccountSelector.vue'
 import Sidebar from '@/components/dashboard/Sidebar.vue'
 
+const router = useRouter()
 const holdingsStore = useHoldingsStore()
 const accountsStore = useAccountsStore()
 const uiStore = useUiStore()
+const authStore = useAuthStore()
 
 const selectedAccount = ref(null)
+const showUserMenu = ref(false)
+const userMenuRef = ref(null)
+
+const userInitials = computed(() => {
+  const name = authStore.user?.full_name || authStore.user?.email || 'U'
+  return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+})
 
 const formatDate = (date) => {
   return format(new Date(date), 'PPpp')
+}
+
+function toggleUserMenu() {
+  showUserMenu.value = !showUserMenu.value
+}
+
+function handleClickOutside(event) {
+  if (userMenuRef.value && !userMenuRef.value.contains(event.target)) {
+    showUserMenu.value = false
+  }
+}
+
+async function handleLogout() {
+  showUserMenu.value = false
+  await authStore.logout()
+  router.push('/login')
 }
 
 const handleSync = async () => {
@@ -85,6 +128,11 @@ watch(selectedAccount, () => {
 onMounted(async () => {
   await accountsStore.fetchAccounts()
   await loadData()
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
@@ -134,6 +182,78 @@ onMounted(async () => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+.user-menu {
+  position: relative;
+  cursor: pointer;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  transition: transform 0.2s;
+}
+
+.user-avatar:hover {
+  transform: scale(1.05);
+}
+
+.user-dropdown {
+  position: absolute;
+  top: 50px;
+  right: 0;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  min-width: 220px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.user-info {
+  padding: 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.user-name {
+  margin: 0 0 4px 0;
+  font-weight: 600;
+  font-size: 14px;
+  color: #111827;
+}
+
+.user-email {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
+}
+
+.logout-btn {
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.logout-btn:hover {
+  background: #f9fafb;
+  color: #dc2626;
 }
 
 .sync-btn:hover:not(:disabled) {

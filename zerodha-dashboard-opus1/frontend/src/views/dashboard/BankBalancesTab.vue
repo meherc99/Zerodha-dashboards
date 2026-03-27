@@ -3,6 +3,11 @@
     <!-- Modals -->
     <BankUploadModal />
     <StatementReviewModal />
+    <AddBankAccountModal
+      :is-open="addBankModalOpen"
+      @close="addBankModalOpen = false"
+      @success="handleBankAdded"
+    />
 
     <!-- Total Balance Section -->
     <div class="total-balance-card">
@@ -129,12 +134,14 @@ import BankUploadModal from '@/components/bank/BankUploadModal.vue'
 import StatementReviewModal from '@/components/bank/StatementReviewModal.vue'
 import BankAnalyticsView from '@/components/bank/BankAnalyticsView.vue'
 import TransactionsList from '@/components/bank/TransactionsList.vue'
+import AddBankAccountModal from '@/components/bank/AddBankAccountModal.vue'
 
 const bankAccountsStore = useBankAccountsStore()
 const uiStore = useUiStore()
 const { selectedBank } = storeToRefs(bankAccountsStore)
 
 const activeTab = ref('overview')
+const addBankModalOpen = ref(false)
 
 const activeBankCount = computed(() => {
   return bankAccountsStore.activeBankAccounts.length
@@ -178,10 +185,14 @@ const handleStatementUpload = (bank) => {
 }
 
 const showAddBankModal = () => {
-  // Placeholder for add bank modal
+  addBankModalOpen.value = true
+}
+
+const handleBankAdded = async () => {
+  await loadBankAccounts()
   uiStore.addNotification({
-    type: 'info',
-    message: 'Add bank account modal - Coming soon!'
+    type: 'success',
+    message: 'Bank account added successfully!'
   })
 }
 

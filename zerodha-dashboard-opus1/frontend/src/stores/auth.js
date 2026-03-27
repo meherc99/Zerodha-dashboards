@@ -5,22 +5,42 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
     token: localStorage.getItem('token'),
-    isAuthenticated: !!localStorage.getItem('token')
+    isAuthenticated: !!localStorage.getItem('token'),
+    loading: false,
+    error: null
   }),
 
   actions: {
     async register(email, password, fullName) {
-      const response = await api.post('/auth/register', {
-        email,
-        password,
-        full_name: fullName
-      })
-      this.setAuth(response.data)
+      this.loading = true
+      this.error = null
+      try {
+        const response = await api.post('/auth/register', {
+          email,
+          password,
+          full_name: fullName
+        })
+        this.setAuth(response.data)
+      } catch (error) {
+        this.error = error.response?.data?.error || 'Registration failed'
+        throw error
+      } finally {
+        this.loading = false
+      }
     },
 
     async login(email, password) {
-      const response = await api.post('/auth/login', { email, password })
-      this.setAuth(response.data)
+      this.loading = true
+      this.error = null
+      try {
+        const response = await api.post('/auth/login', { email, password })
+        this.setAuth(response.data)
+      } catch (error) {
+        this.error = error.response?.data?.error || 'Login failed'
+        throw error
+      } finally {
+        this.loading = false
+      }
     },
 
     setAuth(data) {
@@ -65,6 +85,10 @@ export const useAuthStore = defineStore('auth', {
         api.defaults.headers.common['Authorization'] = `Bearer ${this.token}`
         this.fetchCurrentUser()
       }
+    },
+
+    clearError() {
+      this.error = null
     }
   }
 })
