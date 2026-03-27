@@ -376,3 +376,200 @@ class BankAnalyticsService:
             'merchants': merchants,
             'limit': limit
         }
+
+    @staticmethod
+    def detect_anomalies(bank_account_id: int, user_id: int, threshold: float = 2.0):
+        """
+        Detect unusual transactions based on statistical analysis.
+
+        Identifies transactions that are more than threshold * std_dev away
+        from the mean transaction amount.
+
+        Args:
+            bank_account_id: ID of the bank account
+            user_id: ID of the user (for ownership verification)
+            threshold: Number of standard deviations for anomaly detection (default: 2.0)
+
+        Returns:
+            dict: List of anomalous transactions with anomaly scores
+
+        Raises:
+            ValueError: If account not found or doesn't belong to user
+        """
+        from sqlalchemy import func
+        from decimal import Decimal
+        import math
+
+        # Verify ownership
+        if not BankAnalyticsService._verify_ownership(bank_account_id, user_id):
+            return None
+
+        # Get all verified debit transactions (credits are typically expected)
+        debits = Transaction.query.filter(
+            Transaction.bank_account_id == bank_account_id,
+            Transaction.transaction_type == 'debit',
+            Transaction.verified == True
+        ).all()
+
+        if len(debits) < 10:
+            # Not enough data for statistical analysis
+            return {
+                'anomalies': [],
+                'message': 'Insufficient transaction history for anomaly detection (minimum 10 required)',
+                'threshold': threshold
+            }
+
+        # Calculate mean and standard deviation
+        amounts = [float(txn.amount) for txn in debits]
+        mean = sum(amounts) / len(amounts)
+        variance = sum((x - mean) ** 2 for x in amounts) / len(amounts)
+        std_dev = math.sqrt(variance)
+
+        if std_dev == 0:
+            # All transactions are the same amount
+            return {
+                'anomalies': [],
+                'message': 'All transactions have the same amount',
+                'threshold': threshold
+            }
+
+        # Find anomalies
+        anomalies = []
+        for txn in debits:
+            amount = float(txn.amount)
+            z_score = abs((amount - mean) / std_dev)
+
+            if z_score > threshold:
+                anomaly = txn.to_dict()
+                anomaly['anomaly_score'] = round(z_score, 2)
+                anomaly['deviation_from_mean'] = round(amount - mean, 2)
+
+                if txn.category:
+                    anomaly['category'] = txn.category.to_dict()
+
+                anomalies.append(anomaly)
+
+        # Sort by anomaly score (highest first)
+        anomalies.sort(key=lambda x: x['anomaly_score'], reverse=True)
+
+        return {
+            'anomalies': anomalies,
+            'statistics': {
+                'mean_transaction': round(mean, 2),
+                'std_deviation': round(std_dev, 2),
+                'total_transactions': len(debits)
+            },
+            'threshold': threshold
+        }
+
+    @staticmethod
+    def predict_spending(bank_account_id: int, user_id: int, forecast_days: int = 30):
+        """
+        Predict future spending based on historical trends.
+
+        Uses simple linear regression on daily spending to forecast future balances.
+
+        Args:
+            bank_account_id: ID of the bank account
+            user_id: ID of the user (for ownership verification)
+            forecast_days: Number of days to forecast (default: 30)
+
+        Returns:
+            dict: Predicted balances and spending trends
+
+        Raises:
+            ValueError: If account not found or doesn't belong to user
+        """
+        from datetime import timedelta
+        from decimal import Decimal
+
+        # Verify ownership
+        if not BankAnalyticsService._verify_ownership(bank_account_id, user_id):
+            return None
+
+        # Get current balance
+        bank_account = BankAccount.query.get(bank_account_id)
+        current_balance = float(bank_account.current_balance)
+
+        # Get transactions from last 90 days for trend analysis
+        ninety_days_ago = date.today() - timedelta(days=90)
+
+        transactions = Transaction.query.filter(
+            Transaction.bank_account_id == bank_account_id,
+            Transaction.transaction_date >= ninety_days_ago,
+            Transaction.verified == True
+        ).order_by(Transaction.transaction_date.asc()).all()
+
+        if len(transactions) < 14:
+            return {
+                'predictions': [],
+                'message': 'Insufficient transaction history for prediction (minimum 14 days required)',
+                'forecast_days': forecast_days
+            }
+
+        # Calculate daily net spending (debits - credits)
+        daily_spending = {}
+        for txn in transactions:
+            txn_date = txn.transaction_date
+            if txn_date not in daily_spending:
+                daily_spending[txn_date] = 0
+
+            if txn.transaction_type == 'debit':
+                daily_spending[txn_date] += float(txn.amount)
+            else:  # credit
+                daily_spending[txn_date] -= float(txn.amount)
+
+        # Convert to list of (day_index, net_spending)
+        sorted_dates = sorted(daily_spending.keys())
+        base_date = sorted_dates[0]
+
+        data_points = []
+        for txn_date in sorted_dates:
+            day_index = (txn_date - base_date).days
+            data_points.append((day_index, daily_spending[txn_date]))
+
+        # Simple linear regression
+        n = len(data_points)
+        sum_x = sum(x for x, y in data_points)
+        sum_y = sum(y for x, y in data_points)
+        sum_xy = sum(x * y for x, y in data_points)
+        sum_x2 = sum(x * x for x, y in data_points)
+
+        # Calculate slope and intercept
+        slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x)
+        intercept = (sum_y - slope * sum_x) / n
+
+        # Average daily spending
+        avg_daily_spending = sum_y / n
+
+        # Generate predictions
+        predictions = []
+        today = date.today()
+        current_predicted_balance = current_balance
+
+        for day in range(1, forecast_days + 1):
+            future_date = today + timedelta(days=day)
+            day_index = (future_date - base_date).days
+
+            # Predicted net spending for this day
+            predicted_spending = slope * day_index + intercept
+
+            # Update predicted balance
+            current_predicted_balance -= predicted_spending
+
+            predictions.append({
+                'date': future_date.isoformat(),
+                'predicted_balance': round(current_predicted_balance, 2),
+                'predicted_spending': round(predicted_spending, 2)
+            })
+
+        return {
+            'predictions': predictions,
+            'current_balance': current_balance,
+            'statistics': {
+                'avg_daily_spending': round(avg_daily_spending, 2),
+                'spending_trend': 'increasing' if slope > 0 else 'decreasing',
+                'trend_slope': round(slope, 2)
+            },
+            'forecast_days': forecast_days
+        }

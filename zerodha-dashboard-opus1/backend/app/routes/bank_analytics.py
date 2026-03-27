@@ -108,3 +108,64 @@ def get_top_merchants(bank_account_id):
         return jsonify({'error': 'Bank account not found'}), 404
 
     return jsonify(result), 200
+
+
+@bank_analytics_bp.route('/bank-accounts/<int:bank_account_id>/analytics/anomalies', methods=['GET'])
+@jwt_required()
+def get_anomalies(bank_account_id):
+    """
+    Detect unusual transactions based on statistical analysis.
+
+    Query params:
+        threshold (float): Number of standard deviations for detection (default: 2.0)
+
+    Returns:
+        200: {anomalies: [...], statistics: {...}, threshold: 2.0}
+        404: Account not found or not owned by user
+    """
+    user_id = int(get_jwt_identity())
+    threshold = request.args.get('threshold', default=2.0, type=float)
+
+    # Validate threshold
+    if threshold <= 0:
+        return jsonify({'error': 'Threshold must be positive'}), 400
+
+    result = BankAnalyticsService.detect_anomalies(
+        bank_account_id, user_id, threshold
+    )
+
+    if result is None:
+        return jsonify({'error': 'Bank account not found'}), 404
+
+    return jsonify(result), 200
+
+
+@bank_analytics_bp.route('/bank-accounts/<int:bank_account_id>/analytics/predictions', methods=['GET'])
+@jwt_required()
+def get_spending_predictions(bank_account_id):
+    """
+    Predict future spending and balance based on historical trends.
+
+    Query params:
+        forecast_days (int): Number of days to forecast (default: 30, max: 90)
+
+    Returns:
+        200: {predictions: [...], current_balance: ..., statistics: {...}}
+        404: Account not found or not owned by user
+        400: Invalid forecast_days
+    """
+    user_id = int(get_jwt_identity())
+    forecast_days = request.args.get('forecast_days', default=30, type=int)
+
+    # Validate forecast_days
+    if forecast_days <= 0 or forecast_days > 90:
+        return jsonify({'error': 'forecast_days must be between 1 and 90'}), 400
+
+    result = BankAnalyticsService.predict_spending(
+        bank_account_id, user_id, forecast_days
+    )
+
+    if result is None:
+        return jsonify({'error': 'Bank account not found'}), 404
+
+    return jsonify(result), 200

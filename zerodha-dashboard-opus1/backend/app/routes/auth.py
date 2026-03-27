@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from app.database import db
 from app.models.user import User
+from app.utils.rate_limiter import rate_limit
 from datetime import datetime
 import logging
 
@@ -14,6 +15,7 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
 
 @auth_bp.route('/register', methods=['POST'])
+@rate_limit(max_requests=5, window_minutes=60)  # 5 registrations per hour per IP
 def register():
     """
     Register a new user.
@@ -75,6 +77,7 @@ def register():
 
 
 @auth_bp.route('/login', methods=['POST'])
+@rate_limit(max_requests=10, window_minutes=15)  # 10 login attempts per 15 minutes per IP
 def login():
     """
     Authenticate user and return JWT token.

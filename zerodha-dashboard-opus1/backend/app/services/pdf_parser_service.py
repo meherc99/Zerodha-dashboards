@@ -689,6 +689,33 @@ class PDFParserService:
             # Validate transactions
             is_valid, validation_errors = PDFParserService.validate_transactions(transactions)
 
+            # Extract statement period from transactions
+            transaction_dates = [txn['date'] for txn in transactions if txn.get('date')]
+            if transaction_dates:
+                period_start = min(transaction_dates)
+                period_end = max(transaction_dates)
+
+                # Update statement period dates
+                statement.statement_period_start = period_start
+                statement.statement_period_end = period_end
+
+                # Check for duplicate statement
+                from app.services.bank_statement_service import BankStatementService
+                is_duplicate = BankStatementService.detect_duplicate_statement(
+                    statement.bank_account_id,
+                    period_start,
+                    period_end
+                )
+
+                if is_duplicate:
+                    # Add warning but don't fail - let user decide
+                    if validation_errors is None:
+                        validation_errors = []
+                    validation_errors.append(
+                        f"Warning: A statement for period {period_start} to {period_end} "
+                        "already exists for this account."
+                    )
+
             # Convert Decimal and date to serializable formats for JSON storage
             serializable_transactions = []
             for txn in transactions:

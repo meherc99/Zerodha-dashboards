@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.services.bank_statement_service import BankStatementService
 from app.models.bank_account import BankAccount
+from app.utils.rate_limiter import user_rate_limit
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,7 @@ bank_statements_bp = Blueprint('bank_statements', __name__, url_prefix='/api')
 
 @bank_statements_bp.route('/bank-accounts/<int:account_id>/statements/upload', methods=['POST'])
 @jwt_required()
+@user_rate_limit(max_requests=10, window_minutes=60)  # 10 uploads per hour per user
 def upload_statement(account_id):
     """
     Upload a PDF bank statement for a bank account.

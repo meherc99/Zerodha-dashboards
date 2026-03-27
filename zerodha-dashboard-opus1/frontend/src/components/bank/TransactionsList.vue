@@ -7,7 +7,7 @@
           v-model="filters.search"
           type="text"
           placeholder="Search by description or merchant..."
-          @input="handleFilterChange"
+          @input="handleSearchInput"
         />
       </div>
 
@@ -252,6 +252,22 @@ async function loadTransactions() {
   } finally {
     loading.value = false
   }
+}
+
+// Debounce timer for search input
+let searchDebounceTimer = null
+
+function handleSearchInput() {
+  // Clear existing timer
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+
+  // Set new timer - wait 300ms after user stops typing
+  searchDebounceTimer = setTimeout(() => {
+    pagination.value.currentPage = 1
+    loadTransactions()
+  }, 300)
 }
 
 function handleFilterChange() {

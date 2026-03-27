@@ -165,3 +165,48 @@ def delete_transaction(transaction_id):
             return jsonify({'error': error_msg}), 400
     except Exception as e:
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+
+@transactions_bp.route('/transactions/bulk-recategorize', methods=['POST'])
+@jwt_required()
+def bulk_recategorize():
+    """
+    Bulk recategorize multiple transactions at once.
+
+    Body:
+        {
+            "transaction_ids": [1, 2, 3, ...],
+            "category_id": 5
+        }
+
+    Returns:
+        200: {updated_count: 10, updated_ids: [...]}
+        400: Invalid data
+        403: Access denied for one or more transactions
+    """
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    transaction_ids = data.get('transaction_ids', [])
+    category_id = data.get('category_id')
+
+    if not transaction_ids or not isinstance(transaction_ids, list):
+        return jsonify({'error': 'transaction_ids must be a non-empty array'}), 400
+
+    if category_id is None:
+        return jsonify({'error': 'category_id is required'}), 400
+
+    try:
+        result = TransactionService.bulk_recategorize(transaction_ids, category_id, user_id)
+        return jsonify(result), 200
+    except ValueError as e:
+        error_msg = str(e)
+        if "access denied" in error_msg.lower():
+            return jsonify({'error': error_msg}), 403
+        else:
+            return jsonify({'error': error_msg}), 400
+    except Exception as e:
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500

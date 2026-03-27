@@ -274,6 +274,10 @@ class TransactionService:
             if field in data:
                 raise ValueError(f"Cannot update field: {field}")
 
+        # Track if category changed for learning
+        old_category_id = transaction.category_id
+        category_changed = False
+
         # Update allowed fields
         if 'category_id' in data:
             category_id = data['category_id']
@@ -282,7 +286,11 @@ class TransactionService:
                 category = TransactionCategory.query.get(category_id)
                 if not category:
                     raise ValueError("Invalid category_id")
-            transaction.category_id = category_id
+
+            # Check if category actually changed
+            if category_id != old_category_id:
+                category_changed = True
+                transaction.category_id = category_id
 
         if 'notes' in data:
             transaction.notes = data['notes']
@@ -294,6 +302,17 @@ class TransactionService:
         transaction.updated_at = datetime.utcnow()
 
         db.session.commit()
+
+        # Learn from user's category correction
+        if category_changed and transaction.category_id is not None:
+            try:
+                from app.services.transaction_categorization_service import TransactionCategorizationService
+                TransactionCategorizationService.learn_from_user_correction(
+                    transaction_id, transaction.category_id
+                )
+            except Exception as learn_error:
+                # Don't fail the update if learning fails
+                logger.warning(f"Failed to learn from category correction: {learn_error}")
 
         # Return updated transaction with category info
         txn_dict = transaction.to_dict()
@@ -328,3 +347,56 @@ class TransactionService:
 
         db.session.delete(transaction)
         db.session.commit()
+
+    @staticmethod
+    def bulk_recategorize(transaction_ids, category_id, user_id):
+        """
+        Bulk recategorize multiple transactions.
+
+        Args:
+            transaction_ids: List of transaction IDs
+            category_id: Category ID to apply to all transactions
+            user_id: ID of the user making the request
+
+        Returns:
+            dict: Result with updated count and IDs
+
+        Raises:
+            ValueError: If invalid data or access denied
+        """
+        # Verify category exists
+        category = TransactionCategory.query.get(category_id)
+        if not category:
+            raise ValueError("Invalid category_id")
+
+        # Get all transactions and verify ownership
+        transactions = Transaction.query.filter(
+            Transaction.id.in_(transaction_ids)
+        ).all()
+
+        if not transactions:
+            raise ValueError("No transactions found with provided IDs")
+
+        # Check ownership for all transactions
+        for txn in transactions:
+            if txn.bank_account.user_id != user_id:
+                raise ValueError(f"Access denied for transaction {txn.id}")
+
+        # Update all transactions
+        updated_ids = []
+        for txn in transactions:
+            old_category_id = txn.category_id
+            if old_category_id != category_id:
+                txn.category_id = category_id
+                txn.category_confidence = 0.6  # Lower confidence for bulk update
+                txn.updated_at = datetime.utcnow()
+                updated_ids.append(txn.id)
+
+        db.session.commit()
+
+        logger.info(f"Bulk recategorized {len(updated_ids)} transactions to category {category_id}")
+
+        return {
+            'updated_count': len(updated_ids),
+            'updated_ids': updated_ids
+        }
