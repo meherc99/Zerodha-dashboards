@@ -221,4 +221,17 @@ export const api = {
       params: { limit }
     })
   },
+
+  // Transactions
+  getTransactions(accountId, params = {}) {
+    return apiClient.get(`/bank-accounts/${accountId}/transactions`, { params })
+  },
+
+  updateTransaction(transactionId, data) {
+    return apiClient.put(`/transactions/${transactionId}`, data)
+  },
+
+  deleteTransaction(transactionId) {
+    return apiClient.delete(`/transactions/${transactionId}`)
+  },
 }

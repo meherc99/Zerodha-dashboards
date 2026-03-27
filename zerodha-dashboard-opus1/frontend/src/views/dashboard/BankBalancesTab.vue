@@ -74,6 +74,12 @@
             Overview
           </button>
           <button
+            :class="['tab-btn', { active: activeTab === 'transactions' }]"
+            @click="activeTab = 'transactions'"
+          >
+            Transactions
+          </button>
+          <button
             :class="['tab-btn', { active: activeTab === 'analytics' }]"
             @click="activeTab = 'analytics'"
           >
@@ -97,6 +103,11 @@
             </button>
           </div>
 
+          <!-- Transactions Tab -->
+          <div v-if="activeTab === 'transactions'" class="transactions-content">
+            <TransactionsList :account-id="selectedBank.id" />
+          </div>
+
           <!-- Analytics Tab -->
           <div v-if="activeTab === 'analytics'" class="analytics-content">
             <BankAnalyticsView :account-id="selectedBank.id" />
@@ -117,6 +128,7 @@ import BankCard from '@/components/bank/BankCard.vue'
 import BankUploadModal from '@/components/bank/BankUploadModal.vue'
 import StatementReviewModal from '@/components/bank/StatementReviewModal.vue'
 import BankAnalyticsView from '@/components/bank/BankAnalyticsView.vue'
+import TransactionsList from '@/components/bank/TransactionsList.vue'
 
 const bankAccountsStore = useBankAccountsStore()
 const uiStore = useUiStore()
@@ -454,6 +466,10 @@ onMounted(() => {
   background: #2563eb;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.transactions-content {
+  /* No padding - TransactionsList has its own */
 }
 
 .analytics-content {

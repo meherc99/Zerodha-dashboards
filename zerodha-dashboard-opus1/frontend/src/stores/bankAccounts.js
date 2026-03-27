@@ -36,6 +36,12 @@ export const useBankAccountsStore = defineStore('bankAccounts', {
       loading: false,
       error: null,
     },
+    // Transactions state
+    transactions: {
+      items: [],
+      loading: false,
+      error: null,
+    },
   }),
 
   getters: {
@@ -314,6 +320,42 @@ export const useBankAccountsStore = defineStore('bankAccounts', {
         this.fetchCashflow(accountId, days),
         this.fetchTopMerchants(accountId, 10),
       ])
+    },
+
+    // Transaction actions
+    async fetchTransactions(accountId, params = {}) {
+      this.transactions.loading = true
+      this.transactions.error = null
+      try {
+        const response = await api.getTransactions(accountId, params)
+        this.transactions.items = response.data.transactions || []
+        return response.data
+      } catch (error) {
+        this.transactions.error = error.response?.data?.error || 'Failed to fetch transactions'
+        console.error('Error fetching transactions:', error)
+        throw error
+      } finally {
+        this.transactions.loading = false
+      }
+    },
+
+    async updateTransaction(transactionId, data) {
+      try {
+        const response = await api.updateTransaction(transactionId, data)
+        return response.data
+      } catch (error) {
+        console.error('Error updating transaction:', error)
+        throw error
+      }
+    },
+
+    async deleteTransaction(transactionId) {
+      try {
+        await api.deleteTransaction(transactionId)
+      } catch (error) {
+        console.error('Error deleting transaction:', error)
+        throw error
+      }
     },
   },
 })
