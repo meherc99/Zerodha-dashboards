@@ -77,16 +77,17 @@ VITE v5.x.x  ready in xxx ms
 
 Zerodha access tokens expire daily. Here's how to get one:
 
-**Option 1: Using Kite Connect Dashboard**
-1. Log into https://kite.trade/
-2. Go to "Apps" section
-3. Find your app
-4. Generate access token
+**Option 1: Use the backend workflow (recommended)**
+1. Enter your API key and secret in the Accounts page
+2. Click **Open Zerodha Login** to visit the Kite login page
+3. After login, copy the `request_token` from the redirect URL
+4. Paste the `request_token` into the form and click **Generate Access Token**
+5. Save the account
 
-**Option 2: Using the Login Flow (Recommended)**
-1. Use the Kite Connect login flow with your API key
-2. After login, you'll get a `request_token`
-3. Exchange it for an `access_token` using the backend
+**Option 2: Generate it directly via API**
+1. Call `POST /api/auth/login-url` with your API key
+2. Log into Zerodha and obtain the `request_token`
+3. Call `POST /api/auth/access-token` with API key, API secret, and `request_token`
 
 **Note**: You'll need to refresh your access token daily. We recommend setting up a script to automate this.
 

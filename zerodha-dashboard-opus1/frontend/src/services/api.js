@@ -68,6 +68,15 @@ export const api = {
     return apiClient.delete(`/accounts/${accountId}`)
   },
 
+  // Zerodha auth workflow
+  getLoginUrl(data) {
+    return apiClient.post('/auth/login-url', data)
+  },
+
+  exchangeAccessToken(data) {
+    return apiClient.post('/auth/access-token', data)
+  },
+
   // Holdings
   getHoldings(params = {}) {
     return apiClient.get('/holdings', { params })

@@ -80,16 +80,43 @@
               required
             />
           </div>
+          <div class="helper-actions">
+            <button
+              type="button"
+              class="secondary-btn"
+              @click="handleOpenLoginUrl"
+              :disabled="authLoading || !newAccount.api_key"
+            >
+              {{ authLoading ? 'Opening...' : 'Open Zerodha Login' }}
+            </button>
+            <button
+              type="button"
+              class="secondary-btn"
+              @click="handleGenerateAccessToken"
+              :disabled="authLoading || !newAccount.api_key || !newAccount.api_secret || !newAccount.request_token"
+            >
+              {{ authLoading ? 'Generating...' : 'Generate Access Token' }}
+            </button>
+          </div>
           <div class="form-group">
-            <label for="access-token">Access Token *</label>
+            <label for="request-token">Request Token</label>
+            <input
+              id="request-token"
+              v-model="newAccount.request_token"
+              type="text"
+              placeholder="Paste the request_token from the Zerodha redirect URL"
+            />
+            <small>Use the login button above to authenticate with Zerodha, then paste the request_token here if you want the backend to generate the access token for you.</small>
+          </div>
+          <div class="form-group">
+            <label for="access-token">Access Token</label>
             <input
               id="access-token"
               v-model="newAccount.access_token"
               type="text"
-              placeholder="Your access token"
-              required
+              placeholder="Leave blank if you want the backend to generate it from the request token"
             />
-            <small>Access tokens expire daily. You'll need to update this regularly.</small>
+            <small>Access tokens expire daily. You can paste one directly or generate it from the request token.</small>
           </div>
           <div class="modal-actions">
             <button type="button" @click="showAddModal = false" class="cancel-btn">
@@ -112,16 +139,19 @@ import { useHoldingsStore } from '@/stores/holdings'
 import { useUiStore } from '@/stores/ui'
 import { format, parseISO } from 'date-fns'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import api from '@/services/api'
 
 const accountsStore = useAccountsStore()
 const holdingsStore = useHoldingsStore()
 const uiStore = useUiStore()
+const authLoading = ref(false)
 
 const showAddModal = ref(false)
 const newAccount = ref({
   account_name: '',
   api_key: '',
   api_secret: '',
+  request_token: '',
   access_token: ''
 })
 
@@ -145,6 +175,7 @@ const handleAddAccount = async () => {
       account_name: '',
       api_key: '',
       api_secret: '',
+      request_token: '',
       access_token: ''
     }
   } catch (error) {
@@ -152,6 +183,63 @@ const handleAddAccount = async () => {
       type: 'error',
       message: accountsStore.error || 'Failed to add account'
     })
+  }
+}
+
+const handleOpenLoginUrl = async () => {
+  let popup = null
+
+  try {
+    authLoading.value = true
+    popup = window.open('', '_blank')
+
+    const response = await api.getLoginUrl({ api_key: newAccount.value.api_key })
+    const loginUrl = response.data.login_url
+
+    if (popup) {
+      popup.location.href = loginUrl
+    } else {
+      window.location.href = loginUrl
+    }
+
+    uiStore.addNotification({
+      type: 'success',
+      message: 'Zerodha login opened successfully.'
+    })
+  } catch (error) {
+    if (popup) {
+      popup.close()
+    }
+    uiStore.addNotification({
+      type: 'error',
+      message: error.response?.data?.error || 'Failed to open Zerodha login'
+    })
+  } finally {
+    authLoading.value = false
+  }
+}
+
+const handleGenerateAccessToken = async () => {
+  try {
+    authLoading.value = true
+    const response = await api.exchangeAccessToken({
+      api_key: newAccount.value.api_key,
+      api_secret: newAccount.value.api_secret,
+      request_token: newAccount.value.request_token,
+    })
+
+    newAccount.value.access_token = response.data.access_token
+    uiStore.addNotification({
+      type: 'success',
+      message: 'Access token generated successfully!'
+    })
+  } catch (error) {
+    uiStore.addNotification({
+      type: 'error',
+      message: error.response?.data?.error || 'Failed to generate access token'
+    })
+  } finally {
+    authLoading.value = false
   }
 }
 
@@ -410,6 +498,35 @@ accountsStore.fetchAccounts()
   outline: none;
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.helper-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.secondary-btn {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.secondary-btn:hover:not(:disabled) {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.secondary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .form-group small {

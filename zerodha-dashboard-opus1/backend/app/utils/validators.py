@@ -30,6 +30,11 @@ def validate_account_data(data):
     if len(data['api_secret']) < 10:
         return False, "Invalid API secret format"
 
+    # Require either an existing access token or a request token that can be
+    # exchanged for one by the backend.
+    if not data.get('access_token') and not data.get('request_token'):
+        return False, "Provide either an access token or a request token"
+
     return True, None
 
 

@@ -177,3 +177,57 @@ def logout():
         401: Unauthorized if JWT token is missing or invalid
     """
     return jsonify({'message': 'Successfully logged out'}), 200
+
+"""
+Zerodha authentication endpoints.
+"""
+from flask import Blueprint, request, jsonify
+from kiteconnect import KiteConnect
+import logging
+
+logger = logging.getLogger(__name__)
+
+auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
+
+
+@auth_bp.route('/login-url', methods=['POST'])
+def get_login_url():
+    """Return the Zerodha login URL for a given API key."""
+    data = request.get_json() or {}
+    api_key = data.get('api_key')
+
+    if not api_key:
+        return jsonify({'error': 'api_key is required'}), 400
+
+    try:
+        login_url = KiteConnect(api_key=api_key).login_url()
+        return jsonify({'login_url': login_url}), 200
+    except Exception as e:
+        logger.error(f"Failed to build login URL: {e}")
+        return jsonify({'error': 'Failed to generate login URL'}), 500
+
+
+@auth_bp.route('/access-token', methods=['POST'])
+def exchange_access_token():
+    """Exchange a request token for an access token."""
+    data = request.get_json() or {}
+    api_key = data.get('api_key')
+    api_secret = data.get('api_secret')
+    request_token = data.get('request_token')
+
+    missing = [field for field in ('api_key', 'api_secret', 'request_token') if not data.get(field)]
+    if missing:
+        return jsonify({'error': f"Missing required field(s): {', '.join(missing)}"}), 400
+
+    try:
+        kite = KiteConnect(api_key=api_key)
+        session = kite.generate_session(request_token, api_secret=api_secret)
+        response = {
+            'access_token': session.get('access_token'),
+            'public_token': session.get('public_token'),
+            'user_id': session.get('user_id'),
+        }
+        return jsonify(response), 200
+    except Exception as e:
+        logger.error(f"Failed to exchange request token: {e}")
+        return jsonify({'error': 'Failed to exchange request token for access token'}), 400

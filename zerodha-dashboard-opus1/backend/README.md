@@ -72,6 +72,11 @@ The API will be available at http://localhost:5000
 - `PUT /api/accounts/:id` - Update account
 - `DELETE /api/accounts/:id` - Deactivate account
 
+### Auth
+
+- `POST /api/auth/login-url` - Get the Zerodha login URL for an API key
+- `POST /api/auth/access-token` - Exchange a request token for an access token
+
 ### Holdings
 
 - `GET /api/holdings` - Get holdings with optional filters
@@ -100,6 +105,16 @@ curl -X POST http://localhost:5000/api/accounts \
     "access_token": "your_access_token"
   }'
 ```
+
+If you do not have an access token yet, you can send a `request_token` instead of `access_token`. The backend will exchange it for a fresh access token automatically.
+
+Typical flow:
+
+1. Call `POST /api/auth/login-url` with your `api_key`
+2. Log into Zerodha and copy the `request_token` from the redirect URL
+3. Either:
+   - call `POST /api/auth/access-token` to generate the access token, or
+   - include `request_token` in `POST /api/accounts` and let the backend generate it while saving the account
 
 ## Automated Syncing
 

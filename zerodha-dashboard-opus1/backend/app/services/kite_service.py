@@ -34,6 +34,10 @@ class KiteService:
         else:
             self.access_token = None
 
+    def get_login_url(self) -> str:
+        """Return the Zerodha login URL for the configured API key."""
+        return self.kite.login_url()
+
     def generate_session(self, request_token: str) -> str:
         """
         Generate access token from request token.

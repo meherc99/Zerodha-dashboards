@@ -4,6 +4,7 @@ Account management endpoints.
 from flask import Blueprint, request, jsonify
 from app.database import db
 from app.models import Account
+from app.services.kite_service import KiteService
 from app.utils.encryption import get_encryptor
 from app.utils.validators import validate_account_data
 import logging
@@ -11,6 +12,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 accounts_bp = Blueprint('accounts', __name__, url_prefix='/api/accounts')
+
+
+def _generate_access_token(api_key, api_secret, request_token):
+    """Exchange a request token for an access token."""
+    kite_service = KiteService(api_key=api_key, api_secret=api_secret)
+    return kite_service.generate_session(request_token)
 
 
 @accounts_bp.route('', methods=['GET'])
@@ -54,12 +61,26 @@ def create_account():
         # Encrypt credentials
         encryptor = get_encryptor()
 
+        access_token = data.get('access_token')
+        request_token = data.get('request_token')
+
+        if not access_token and request_token:
+            try:
+                access_token = _generate_access_token(
+                    data['api_key'],
+                    data['api_secret'],
+                    request_token,
+                )
+            except Exception as e:
+                logger.error(f"Failed to generate access token for {data['account_name']}: {e}")
+                return jsonify({'error': 'Failed to generate access token from request token'}), 400
+
         account = Account(
             account_name=data['account_name'],
             api_key_encrypted=encryptor.encrypt(data['api_key']),
             api_secret_encrypted=encryptor.encrypt(data['api_secret']),
-            access_token_encrypted=encryptor.encrypt(data.get('access_token')) if data.get('access_token') else None,
-            request_token_encrypted=encryptor.encrypt(data.get('request_token')) if data.get('request_token') else None,
+            access_token_encrypted=encryptor.encrypt(access_token) if access_token else None,
+            request_token_encrypted=encryptor.encrypt(request_token) if request_token else None,
             is_active=True
         )
 
@@ -89,21 +110,35 @@ def update_account(account_id):
     try:
         encryptor = get_encryptor()
 
+        current_api_key = encryptor.decrypt(account.api_key_encrypted)
+        current_api_secret = encryptor.decrypt(account.api_secret_encrypted)
+        access_token = data.get('access_token')
+        request_token = data.get('request_token')
+
         # Update fields if provided
         if 'account_name' in data:
             account.account_name = data['account_name']
 
         if 'api_key' in data:
             account.api_key_encrypted = encryptor.encrypt(data['api_key'])
+            current_api_key = data['api_key']
 
         if 'api_secret' in data:
             account.api_secret_encrypted = encryptor.encrypt(data['api_secret'])
+            current_api_secret = data['api_secret']
 
-        if 'access_token' in data:
-            account.access_token_encrypted = encryptor.encrypt(data['access_token'])
+        if request_token:
+            account.request_token_encrypted = encryptor.encrypt(request_token)
 
-        if 'request_token' in data:
-            account.request_token_encrypted = encryptor.encrypt(data['request_token'])
+        if access_token:
+            account.access_token_encrypted = encryptor.encrypt(access_token)
+        elif request_token:
+            try:
+                generated_token = _generate_access_token(current_api_key, current_api_secret, request_token)
+                account.access_token_encrypted = encryptor.encrypt(generated_token)
+            except Exception as e:
+                logger.error(f"Failed to generate access token while updating {account.account_name}: {e}")
+                return jsonify({'error': 'Failed to generate access token from request token'}), 400
 
         if 'is_active' in data:
             account.is_active = data['is_active']
