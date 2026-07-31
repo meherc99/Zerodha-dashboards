@@ -2,6 +2,7 @@
 Tests for Transaction model
 """
 import pytest
+from cryptography.fernet import Fernet
 from datetime import date, datetime
 from decimal import Decimal
 from app import create_app, db
@@ -14,10 +15,13 @@ from app.models.user import User
 @pytest.fixture
 def app():
     """Create and configure test app"""
-    app = create_app()
-    app.config.update({
+    app = create_app({
         'TESTING': True,
         'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+        'JWT_SECRET_KEY': 'test-jwt-secret-key-at-least-32-bytes',
+        'SECRET_KEY': 'test-secret-key',
+        'ENCRYPTION_KEY': Fernet.generate_key().decode(),
+        'SCHEDULER_ENABLED': False,
     })
 
     with app.app_context():
@@ -205,7 +209,7 @@ def test_transaction_bank_account_relationship(app, sample_bank_account):
         db.session.commit()
 
         # Reload from database
-        retrieved_transaction = Transaction.query.get(transaction.id)
+        retrieved_transaction = db.session.get(Transaction, transaction.id)
         assert retrieved_transaction.bank_account is not None
         assert retrieved_transaction.bank_account.id == sample_bank_account['id']
         assert retrieved_transaction.bank_account.bank_name == 'HDFC Bank'
@@ -226,7 +230,7 @@ def test_transaction_category_relationship(app, sample_bank_account, sample_cate
         db.session.commit()
 
         # Reload from database
-        retrieved_transaction = Transaction.query.get(transaction.id)
+        retrieved_transaction = db.session.get(Transaction, transaction.id)
         assert retrieved_transaction.category is not None
         assert retrieved_transaction.category.id == sample_category['id']
         assert retrieved_transaction.category.name == 'Groceries'
@@ -334,7 +338,7 @@ def test_bank_account_transactions_relationship(app, sample_bank_account):
         db.session.commit()
 
         # Retrieve account and check transactions
-        account = BankAccount.query.get(sample_bank_account['id'])
+        account = db.session.get(BankAccount, sample_bank_account['id'])
         assert len(account.transactions) == 2
         assert transaction1 in account.transactions
         assert transaction2 in account.transactions
@@ -364,7 +368,10 @@ def test_category_transactions_relationship(app, sample_bank_account, sample_cat
         db.session.commit()
 
         # Retrieve category and check transactions
-        category = TransactionCategory.query.get(sample_category['id'])
+        category = db.session.get(
+            TransactionCategory,
+            sample_category['id'],
+        )
         assert len(category.transactions) == 2
         assert transaction1 in category.transactions
         assert transaction2 in category.transactions
@@ -385,12 +392,12 @@ def test_transaction_cascade_delete_from_bank_account(app, sample_bank_account):
         transaction_id = transaction.id
 
         # Delete the bank account
-        account = BankAccount.query.get(sample_bank_account['id'])
+        account = db.session.get(BankAccount, sample_bank_account['id'])
         db.session.delete(account)
         db.session.commit()
 
         # Transaction should be deleted due to cascade
-        deleted_transaction = Transaction.query.get(transaction_id)
+        deleted_transaction = db.session.get(Transaction, transaction_id)
         assert deleted_transaction is None
 
 
@@ -429,7 +436,7 @@ def test_transaction_updated_at_changes(app, sample_bank_account):
 
     # Update in new context to ensure timestamp changes
     with app.app_context():
-        transaction = Transaction.query.get(transaction_id)
+        transaction = db.session.get(Transaction, transaction_id)
         transaction.description = 'Updated description'
         db.session.commit()
 

@@ -1,191 +1,296 @@
-"""
-US Holdings service for parsing Excel files and managing US stock holdings.
-"""
+"""US-holdings spreadsheet import and price refresh service."""
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+import logging
+import re
+
 import pandas as pd
-from datetime import datetime
+
+from app.database import db
 from app.models.holding import Holding
 from app.models.snapshot import Snapshot
-from app.database import db
 from app.services.finnhub_service import FinnhubService
-import logging
+from app.services.portfolio_service import PortfolioService
+
 
 logger = logging.getLogger(__name__)
+MAX_US_HOLDINGS = 100
+DB_MONEY_MAX = Decimal('9999999999999.99')
+DB_POSITION_INPUT_MAX = Decimal('99999999999999.999999')
+
+
+def _fits_decimal(value, maximum, decimal_places):
+    quantum = Decimal('1').scaleb(-decimal_places)
+    try:
+        return abs(value) <= maximum and value == value.quantize(quantum)
+    except InvalidOperation:
+        return False
+
+
+def _decimal(value):
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError('Expected a valid number')
+    if not result.is_finite():
+        raise ValueError('Expected a finite number')
+    return result
 
 
 class USHoldingsService:
-    """Service for managing US stock holdings"""
+    """Manage imported US positions without mutating historical snapshots."""
 
-    def __init__(self):
-        self.finnhub = FinnhubService()
+    def __init__(self, price_service=None):
+        self._price_service = price_service
+
+    @property
+    def price_service(self):
+        if self._price_service is None:
+            self._price_service = FinnhubService()
+        return self._price_service
 
     def parse_excel_file(self, file_path):
-        """
-        Parse Excel file and return list of holdings.
+        df = pd.read_excel(file_path, nrows=MAX_US_HOLDINGS + 1)
+        if len(df.index) > MAX_US_HOLDINGS:
+            raise ValueError(
+                f'A US-holdings workbook may contain at most '
+                f'{MAX_US_HOLDINGS} positions'
+            )
+        required = {'Symbol', 'Quantity', 'Average Price'}
+        missing = sorted(required - set(df.columns))
+        if missing:
+            raise ValueError(f"Missing required columns: {', '.join(missing)}")
 
-        Expected columns: Symbol, Quantity, Average Price, Purchase Date (optional)
-
-        Args:
-            file_path: Path to Excel file
-
-        Returns:
-            list: List of holding dictionaries
-
-        Raises:
-            ValueError: If required columns are missing or data is invalid
-        """
-        try:
-            df = pd.read_excel(file_path)
-
-            # Validate required columns
-            required_cols = ['Symbol', 'Quantity', 'Average Price']
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            if missing_cols:
-                raise ValueError(f"Missing required columns: {', '.join(missing_cols)}")
-
-            holdings = []
-            for idx, row in df.iterrows():
-                # Skip empty rows
+        holdings = []
+        seen_symbols = set()
+        errors = []
+        for index, row in df.iterrows():
+            row_number = int(index) + 2
+            if row.isna().all():
+                continue
+            try:
                 if pd.isna(row['Symbol']):
-                    continue
+                    raise ValueError('Symbol is required')
+                symbol = str(row['Symbol']).strip().upper()
+                quantity = _decimal(row['Quantity'])
+                average_price = _decimal(row['Average Price'])
+                if not 1 <= len(symbol) <= 32 or not re.fullmatch(
+                    r'[A-Z0-9.-]+',
+                    symbol,
+                ):
+                    raise ValueError('Symbol must use 1-32 ticker characters')
+                if quantity <= 0:
+                    raise ValueError('Quantity must be positive')
+                if average_price <= 0:
+                    raise ValueError('Average Price must be positive')
+                if (
+                    not _fits_decimal(
+                        quantity,
+                        DB_POSITION_INPUT_MAX,
+                        6,
+                    )
+                    or not _fits_decimal(
+                        average_price,
+                        DB_POSITION_INPUT_MAX,
+                        6,
+                    )
+                    or quantity * average_price > DB_MONEY_MAX
+                ):
+                    raise ValueError(
+                        'Position exceeds database precision'
+                    )
+                if symbol in seen_symbols:
+                    raise ValueError(
+                        f'Duplicate Symbol {symbol}'
+                    )
 
-                try:
-                    holding = {
-                        'symbol': str(row['Symbol']).strip().upper(),
-                        'quantity': float(row['Quantity']),
-                        'average_price': float(row['Average Price']),
-                        'purchase_date': None
+                purchase_date = None
+                if 'Purchase Date' in df.columns and not pd.isna(
+                    row['Purchase Date']
+                ):
+                    parsed_date = pd.to_datetime(
+                        row['Purchase Date'],
+                        errors='raise',
+                    )
+                    if pd.isna(parsed_date):
+                        raise ValueError('Purchase Date is invalid')
+                    purchase_date = parsed_date.date()
+
+                seen_symbols.add(symbol)
+                holdings.append(
+                    {
+                        'symbol': symbol,
+                        'quantity': quantity,
+                        'average_price': average_price,
+                        'purchase_date': purchase_date,
+                        'source_row': int(index) + 2,
                     }
+                )
+            except (ValueError, TypeError) as error:
+                errors.append(f'Row {row_number}: {error}')
 
-                    # Validate data
-                    if holding['quantity'] <= 0:
-                        logger.warning(f"Row {idx + 2}: Invalid quantity ({holding['quantity']}), skipping")
-                        continue
+        if errors:
+            suffix = f' ({len(errors)} invalid rows)' if len(errors) > 1 else ''
+            raise ValueError(f'Workbook validation failed{suffix}: {errors[0]}')
 
-                    if holding['average_price'] <= 0:
-                        logger.warning(f"Row {idx + 2}: Invalid average price ({holding['average_price']}), skipping")
-                        continue
-
-                    # Parse optional purchase date
-                    if 'Purchase Date' in df.columns and not pd.isna(row['Purchase Date']):
-                        if isinstance(row['Purchase Date'], datetime):
-                            holding['purchase_date'] = row['Purchase Date']
-                        else:
-                            # Try to parse as string
-                            try:
-                                holding['purchase_date'] = pd.to_datetime(row['Purchase Date'])
-                            except:
-                                logger.warning(f"Row {idx + 2}: Could not parse purchase date: {row['Purchase Date']}")
-
-                    holdings.append(holding)
-
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Row {idx + 2}: Error parsing data - {str(e)}, skipping")
-                    continue
-
-            if not holdings:
-                raise ValueError("No valid holdings found in file. Please check the data format.")
-
-            logger.info(f"Parsed {len(holdings)} holdings from Excel file")
-            return holdings
-
-        except Exception as e:
-            logger.error(f"Failed to parse Excel file: {str(e)}")
-            raise Exception(f"Failed to parse Excel file: {str(e)}")
+        if not holdings:
+            raise ValueError('The spreadsheet contains no holdings')
+        return holdings
 
     def fetch_current_prices(self, symbols):
-        """
-        Fetch current prices for list of symbols using Finnhub.
+        return self.price_service.get_quotes_batch(sorted(set(symbols)))
 
-        Args:
-            symbols: List of stock symbols
-
-        Returns:
-            dict: {symbol: price_data}
-        """
-        return self.finnhub.get_quotes_batch(symbols)
-
-    def create_holdings(self, account_id, parsed_holdings, fetch_prices=True):
-        """
-        Create US holdings in database with optional price fetching.
-
-        Args:
-            account_id: Account ID to associate holdings with
-            parsed_holdings: List of parsed holding dictionaries
-            fetch_prices: Whether to fetch current prices from Finnhub
-
-        Returns:
-            list: Created Holding objects
-
-        Raises:
-            Exception: If database operation fails
-        """
+    def _prices_or_empty(self, symbols, fetch_prices):
+        if not fetch_prices:
+            return {}
         try:
-            # Create new snapshot
-            snapshot = Snapshot(
-                account_id=account_id,
-                snapshot_date=datetime.utcnow()
+            return self.fetch_current_prices(symbols)
+        except Exception:
+            logger.warning(
+                'Live US prices unavailable; imported positions remain '
+                'valued at cost',
             )
-            db.session.add(snapshot)
-            db.session.flush()  # Get snapshot ID
+            return {}
 
-            # Fetch current prices if requested
-            prices = {}
-            if fetch_prices:
-                symbols = [h['symbol'] for h in parsed_holdings]
-                logger.info(f"Fetching prices for {len(symbols)} symbols from Finnhub...")
-                prices = self.fetch_current_prices(symbols)
+    def create_holdings(self, account, parsed_holdings, fetch_prices=True):
+        prices = self._prices_or_empty(
+            [holding['symbol'] for holding in parsed_holdings],
+            fetch_prices,
+        )
+        now = datetime.utcnow()
+        snapshot = PortfolioService.create_account_snapshot(
+            account,
+            trigger='us_upload',
+            snapshot_date=now,
+            exclude_types=('us_equity',),
+        )
 
-            # Create holdings
-            created_holdings = []
-            for holding_data in parsed_holdings:
-                symbol = holding_data['symbol']
+        created = []
+        for data in parsed_holdings:
+            symbol = data['symbol']
+            quote = prices.get(symbol, {})
+            has_live_price = 'current_price' in quote
+            last_price = _decimal(
+                quote['current_price']
+                if has_live_price
+                else data['average_price']
+            )
+            quantity = data['quantity']
+            average_price = data['average_price']
+            current_value = quantity * last_price
+            invested = quantity * average_price
+            pnl = current_value - invested
 
-                # Get current price or use average price
-                if symbol in prices and 'current_price' in prices[symbol]:
-                    last_price = prices[symbol]['current_price']
-                    day_change = prices[symbol].get('change', 0)
-                    day_change_percentage = prices[symbol].get('change_percent', 0)
-                else:
-                    # Use average price if Finnhub fetch failed
-                    logger.warning(f"Using average price for {symbol} as current price fetch failed")
-                    last_price = holding_data['average_price']
-                    day_change = 0
-                    day_change_percentage = 0
+            holding = Holding(
+                account_id=account.id,
+                snapshot_id=snapshot.id,
+                holding_key=f'us_equity:US:{symbol}',
+                tradingsymbol=symbol[:100],
+                exchange='US',
+                instrument_type='us_equity',
+                market='US',
+                currency='USD',
+                quantity=quantity,
+                average_price=average_price,
+                last_price=last_price,
+                last_price_date=date.today() if has_live_price else None,
+                current_value=current_value,
+                pnl=pnl,
+                pnl_percentage=pnl / invested * 100 if invested else 0,
+                day_change=_decimal(quote.get('change', 0)),
+                day_change_percentage=_decimal(quote.get('change_percent', 0)),
+                purchase_date=data.get('purchase_date'),
+                sector='Other',
+                source='finnhub' if has_live_price else 'upload_us_at_cost',
+                valued_at=now,
+            )
+            db.session.add(holding)
+            created.append(holding)
 
-                # Calculate values
-                quantity = holding_data['quantity']
-                average_price = holding_data['average_price']
-                current_value = quantity * last_price
-                investment = quantity * average_price
-                pnl = current_value - investment
-                pnl_percentage = (pnl / investment * 100) if investment > 0 else 0
+        PortfolioService.finalize_snapshot(snapshot)
+        db.session.commit()
+        return created
 
-                holding = Holding(
-                    account_id=account_id,
+    def refresh_prices(self, account):
+        previous = (
+            Snapshot.query.filter_by(account_id=account.id, status='completed')
+            .order_by(Snapshot.snapshot_date.desc())
+            .first()
+        )
+        us_holdings = (
+            [holding for holding in previous.holdings if holding.instrument_type == 'us_equity']
+            if previous
+            else []
+        )
+        if not us_holdings:
+            return 0
+
+        symbols = sorted({
+            holding.tradingsymbol
+            for holding in us_holdings
+        })
+        prices = self.fetch_current_prices(symbols)
+        unavailable = [
+            symbol
+            for symbol in symbols
+            if not isinstance(prices.get(symbol), dict)
+            or 'current_price' not in prices[symbol]
+        ]
+        if unavailable:
+            # A refresh is an all-or-nothing valuation event. Publishing a new
+            # snapshot with silently carried-forward prices would make a
+            # provider outage look like a successful market-data refresh.
+            raise RuntimeError(
+                'Live prices are unavailable for one or more US holdings'
+            )
+
+        now = datetime.utcnow()
+        snapshot = PortfolioService.create_account_snapshot(
+            account,
+            trigger='us_refresh',
+            snapshot_date=now,
+            exclude_types=('us_equity',),
+        )
+
+        updated = 0
+        for old in us_holdings:
+            quote = prices.get(old.tradingsymbol, {})
+            last_price = _decimal(quote.get('current_price', old.last_price))
+            quantity = _decimal(old.quantity)
+            average_price = _decimal(old.average_price)
+            current_value = quantity * last_price
+            invested = quantity * average_price
+            pnl = current_value - invested
+            has_live_price = True
+            db.session.add(
+                Holding(
+                    account_id=account.id,
                     snapshot_id=snapshot.id,
-                    tradingsymbol=symbol,
-                    exchange='US',  # Generic US exchange
-                    instrument_type='us_equity',
-                    market='US',
-                    quantity=int(quantity),
+                    holding_key=old.holding_key,
+                    tradingsymbol=old.tradingsymbol,
+                    exchange=old.exchange,
+                    instrument_type=old.instrument_type,
+                    market=old.market,
+                    currency='USD',
+                    quantity=quantity,
                     average_price=average_price,
                     last_price=last_price,
+                    last_price_date=date.today() if has_live_price else old.last_price_date,
                     current_value=current_value,
                     pnl=pnl,
-                    pnl_percentage=pnl_percentage,
-                    day_change=day_change,
-                    day_change_percentage=day_change_percentage,
-                    purchase_date=holding_data.get('purchase_date'),
-                    sector='Unknown'  # Could fetch from Finnhub company profile
+                    pnl_percentage=pnl / invested * 100 if invested else 0,
+                    day_change=_decimal(quote.get('change', old.day_change)),
+                    day_change_percentage=_decimal(
+                        quote.get('change_percent', old.day_change_percentage)
+                    ),
+                    purchase_date=old.purchase_date,
+                    sector=old.sector,
+                    source='finnhub' if has_live_price else old.source,
+                    valued_at=now if has_live_price else old.valued_at,
                 )
-                db.session.add(holding)
-                created_holdings.append(holding)
+            )
+            updated += 1
 
-            db.session.commit()
-            logger.info(f"Created {len(created_holdings)} US holdings in database")
-            return created_holdings
-
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Failed to create holdings: {str(e)}")
-            raise Exception(f"Failed to create holdings: {str(e)}")
+        PortfolioService.finalize_snapshot(snapshot)
+        db.session.commit()
+        return updated

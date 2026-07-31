@@ -1,25 +1,54 @@
 <template>
-  <div class="stocks-tab">
-    <!-- Equity Summary Cards -->
-    <PortfolioSummary :summary="holdingsStore.equitySummary" />
-
-    <!-- Charts Row -->
-    <div class="charts-row">
-      <div class="chart-card">
-        <h3>Equity Allocation</h3>
-        <PieChart v-if="allocationData.labels.length" :data="allocationData" />
-        <div v-else class="empty-chart">No equity holdings</div>
+  <div class="page-stack stocks-page">
+    <div class="page-intro">
+      <div>
+        <p class="eyebrow">Indian equities</p>
+        <h2>Stocks at a glance</h2>
+        <p>Track position size, sector concentration and unrealised performance in INR.</p>
       </div>
-
-      <div class="chart-card">
-        <h3>Sector Breakdown</h3>
-        <BarChart v-if="sectorData.labels.length" :data="sectorData" />
-        <div v-else class="empty-chart">No sector data</div>
-      </div>
+      <span class="status-chip">INR portfolio</span>
     </div>
 
-    <!-- Equity Holdings Table -->
-    <HoldingsTable :holdings="holdingsStore.equityHoldings" />
+    <section v-if="!equityHoldings.length" class="state-panel">
+      <span class="state-icon" aria-hidden="true">IN</span>
+      <h2>No Indian stock holdings</h2>
+      <p>This page will populate when a connected Zerodha account returns equity holdings.</p>
+      <div class="state-actions">
+        <router-link to="/accounts" class="secondary-button">Check accounts</router-link>
+      </div>
+    </section>
+
+    <template v-else>
+      <PortfolioSummary :summary="holdingsStore.equitySummary" currency="INR" />
+
+      <div class="charts-grid">
+        <ChartPanel
+          title="Stock allocation"
+          subtitle="Top positions by current market value"
+          :has-data="allocationData.labels.length > 0"
+        >
+          <PieChart :data="allocationData" />
+        </ChartPanel>
+
+        <ChartPanel
+          title="Sector exposure"
+          subtitle="Current equity value by sector"
+          :has-data="sectorData.labels.length > 0"
+          empty-title="No sector labels"
+          empty-message="Sector exposure will appear when holdings include classification data."
+        >
+          <BarChart :data="sectorData" horizontal />
+        </ChartPanel>
+      </div>
+
+      <HoldingsTable
+        :holdings="equityHoldings"
+        title="Indian stock holdings"
+        subtitle="Values shown in INR"
+        currency="INR"
+        empty-title="No Indian stocks"
+      />
+    </template>
   </div>
 </template>
 
@@ -29,74 +58,62 @@ import { useHoldingsStore } from '@/stores/holdings'
 
 import PortfolioSummary from '@/components/dashboard/PortfolioSummary.vue'
 import HoldingsTable from '@/components/dashboard/HoldingsTable.vue'
+import ChartPanel from '@/components/dashboard/ChartPanel.vue'
 import PieChart from '@/components/charts/PieChart.vue'
 import BarChart from '@/components/charts/BarChart.vue'
 
 const holdingsStore = useHoldingsStore()
+const equityHoldings = computed(() => holdingsStore.equityHoldings)
 
 const allocationData = computed(() => {
-  const holdings = holdingsStore.equityHoldings.slice(0, 10) // Top 10
+  const holdings = equityHoldings.value
+    .slice()
+    .sort((left, right) => Number(right.current_value || 0) - Number(left.current_value || 0))
+    .slice(0, 8)
+
   return {
-    labels: holdings.map(h => h.tradingsymbol),
-    values: holdings.map(h => h.current_value)
+    labels: holdings.map(holding => holding.tradingsymbol),
+    values: holdings.map(holding => Number(holding.current_value || 0))
   }
 })
 
 const sectorData = computed(() => {
-  // Filter sector breakdown to only equity sectors
-  const equitySectors = holdingsStore.sectorBreakdown.filter(s => {
-    return holdingsStore.equityHoldings.some(h => h.sector === s.sector)
-  })
+  const sectors = equityHoldings.value.reduce((totals, holding) => {
+    const sector = holding.sector || 'Uncategorised'
+    totals[sector] = (totals[sector] || 0) + Number(holding.current_value || 0)
+    return totals
+  }, {})
+  const sorted = Object.entries(sectors).sort((left, right) => right[1] - left[1])
+
   return {
-    labels: equitySectors.map(s => s.sector),
-    values: equitySectors.map(s => s.total_value),
-    label: 'Sector Value'
+    labels: sorted.map(([sector]) => sector),
+    values: sorted.map(([, value]) => value),
+    label: 'Current value'
   }
 })
 </script>
 
 <style scoped>
-.stocks-tab {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-}
-
-.charts-row {
+.charts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.chart-card {
-  background: white;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+.state-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 13px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+  font-size: 0.74rem;
+  font-weight: 850;
 }
 
-.chart-card h3 {
-  margin: 0 0 20px 0;
-  font-size: 18px;
-  color: #111827;
-}
-
-.empty-chart {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 300px;
-  color: #9ca3af;
-  font-size: 14px;
-}
-
-@media (max-width: 768px) {
-  .stocks-tab {
-    padding: 15px;
-  }
-
-  .charts-row {
+@media (max-width: 900px) {
+  .charts-grid {
     grid-template-columns: 1fr;
   }
 }

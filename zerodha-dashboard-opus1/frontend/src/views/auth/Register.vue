@@ -11,6 +11,7 @@
             id="fullName"
             v-model="fullName"
             type="text"
+            autocomplete="name"
             placeholder="John Doe"
             required
             autofocus
@@ -23,6 +24,7 @@
             id="email"
             v-model="email"
             type="email"
+            autocomplete="email"
             placeholder="your@email.com"
             required
           />
@@ -34,7 +36,9 @@
             id="password"
             v-model="password"
             type="password"
+            autocomplete="new-password"
             placeholder="At least 8 characters"
+            minlength="8"
             required
           />
         </div>
@@ -43,7 +47,7 @@
           {{ loading ? 'Creating account...' : 'Register' }}
         </button>
 
-        <p v-if="error" class="error-message">{{ error }}</p>
+        <p v-if="error" class="error-message" role="alert">{{ error }}</p>
       </form>
 
       <p class="auth-link">
@@ -75,10 +79,9 @@ const handleRegister = async () => {
 
   try {
     await authStore.register(email.value, password.value, fullName.value)
-    router.push('/dashboard')
-  } catch (err) {
+    await router.replace('/dashboard/overview')
+  } catch {
     // Error is already set in the store
-    console.error('Registration error:', err)
   }
 }
 </script>

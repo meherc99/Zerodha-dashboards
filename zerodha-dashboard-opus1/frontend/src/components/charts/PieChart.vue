@@ -25,6 +25,10 @@ const props = defineProps({
   title: {
     type: String,
     default: ''
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
@@ -49,7 +53,13 @@ const chartData = computed(() => ({
   }]
 }))
 
-const chartOptions = {
+const moneyFormatter = computed(() => new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: props.currency,
+  maximumFractionDigits: 0
+}))
+
+const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
@@ -68,13 +78,13 @@ const chartOptions = {
           const label = context.label || ''
           const value = context.parsed || 0
           const total = context.dataset.data.reduce((a, b) => a + b, 0)
-          const percentage = ((value / total) * 100).toFixed(2)
-          return `${label}: ₹${value.toLocaleString('en-IN')} (${percentage}%)`
+          const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0'
+          return `${label}: ${moneyFormatter.value.format(value)} (${percentage}%)`
         }
       }
     }
   }
-}
+}))
 </script>
 
 <style scoped>

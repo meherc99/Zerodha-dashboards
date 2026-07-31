@@ -2,6 +2,8 @@
 Manual test script to verify bank analytics endpoints work correctly.
 Run this after starting the Flask app to test the analytics endpoints.
 """
+__test__ = False
+
 import requests
 import json
 from datetime import date, timedelta

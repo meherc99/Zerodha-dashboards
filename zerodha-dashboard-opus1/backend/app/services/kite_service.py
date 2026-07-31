@@ -3,7 +3,8 @@ Zerodha Kite Connect API integration service.
 Handles authentication, data fetching, and API interactions.
 """
 from kiteconnect import KiteConnect
-from datetime import datetime, timedelta, date
+from datetime import datetime, date
+from decimal import Decimal, InvalidOperation
 import time
 import logging
 from typing import List, Dict, Optional
@@ -54,58 +55,143 @@ class KiteService:
             self.kite.set_access_token(self.access_token)
             logger.info("Access token generated successfully")
             return self.access_token
-        except Exception as e:
-            logger.error(f"Error generating session: {e}")
+        except Exception:
+            logger.error("Kite session generation failed")
             raise
 
-    def get_holdings(self) -> List[Dict]:
-        """
-        Fetch all holdings (stocks and mutual funds).
+    @staticmethod
+    def _decimal(value) -> Decimal:
+        try:
+            result = Decimal(str(value or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal('0')
+        return result if result.is_finite() else Decimal('0')
 
-        Returns:
-            List of holding dictionaries
-        """
+    @staticmethod
+    def _date(value):
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        try:
+            return datetime.fromisoformat(str(value)).date()
+        except ValueError:
+            return None
+
+    def get_equity_holdings(self) -> List[Dict]:
+        """Fetch and normalize delivery equity holdings."""
         if not self.access_token:
             raise ValueError("Access token not set. Call generate_session first.")
 
         try:
-            # Fetch equity holdings
             holdings = self.kite.holdings()
-            logger.info(f"Fetched {len(holdings)} holdings")
-
-            # Process and normalize holdings data
             processed_holdings = []
             for holding in holdings:
-                processed_holding = {
-                    'tradingsymbol': holding.get('tradingsymbol'),
-                    'exchange': holding.get('exchange'),
-                    'isin': holding.get('isin'),
+                symbol = str(holding.get('tradingsymbol') or '').strip()
+                if not symbol:
+                    logger.warning("Skipping equity holding without tradingsymbol")
+                    continue
+
+                quantity = self._decimal(holding.get('quantity'))
+                average_price = self._decimal(holding.get('average_price'))
+                last_price = self._decimal(holding.get('last_price'))
+                current_value = quantity * last_price
+                investment = quantity * average_price
+                pnl = self._decimal(holding.get('pnl'))
+                if holding.get('pnl') is None:
+                    pnl = current_value - investment
+
+                exchange = str(holding.get('exchange') or 'NSE').upper()
+                isin = holding.get('isin')
+                processed_holdings.append({
+                    'holding_key': f"equity:{exchange}:{isin or symbol}",
+                    'tradingsymbol': symbol,
+                    'exchange': exchange,
+                    'isin': isin,
                     'instrument_type': 'equity',
-                    'quantity': holding.get('quantity', 0),
-                    'average_price': holding.get('average_price', 0),
-                    'last_price': holding.get('last_price', 0),
-                    'pnl': holding.get('pnl', 0),
-                    'day_change': holding.get('day_change', 0),
-                    'day_change_percentage': holding.get('day_change_percentage', 0),
-                }
-
-                # Calculate current value and P&L percentage
-                current_value = processed_holding['quantity'] * processed_holding['last_price']
-                invested_value = processed_holding['quantity'] * processed_holding['average_price']
-                processed_holding['current_value'] = current_value
-
-                if invested_value > 0:
-                    processed_holding['pnl_percentage'] = ((current_value - invested_value) / invested_value) * 100
-                else:
-                    processed_holding['pnl_percentage'] = 0
-
-                processed_holdings.append(processed_holding)
-
+                    'market': 'IN',
+                    'currency': 'INR',
+                    'quantity': quantity,
+                    'average_price': average_price,
+                    'last_price': last_price,
+                    'last_price_date': None,
+                    'pnl': pnl,
+                    'pnl_percentage': pnl / investment * 100 if investment else 0,
+                    'day_change': self._decimal(holding.get('day_change')),
+                    'day_change_percentage': self._decimal(
+                        holding.get('day_change_percentage')
+                    ),
+                    'current_value': current_value,
+                    'folio': None,
+                    'source': 'kite_equity',
+                })
+            logger.info("Fetched %s equity holdings", len(processed_holdings))
             return processed_holdings
-
-        except Exception as e:
-            logger.error(f"Error fetching holdings: {e}")
+        except Exception:
+            logger.error("Kite equity-holdings fetch failed")
             raise
+
+    def get_mutual_fund_holdings(self) -> List[Dict]:
+        """Fetch and normalize Coin mutual-fund holdings."""
+        if not self.access_token:
+            raise ValueError("Access token not set. Call generate_session first.")
+
+        try:
+            holdings = self.kite.mf_holdings()
+            processed_holdings = []
+            for holding in holdings:
+                raw_symbol = (
+                    holding.get('tradingsymbol')
+                    or holding.get('fund')
+                    or holding.get('isin')
+                )
+                symbol = str(raw_symbol or '').strip()
+                if not symbol:
+                    logger.warning("Skipping mutual-fund holding without identity")
+                    continue
+
+                folio = str(holding.get('folio') or '').strip() or None
+                quantity = self._decimal(holding.get('quantity'))
+                average_price = self._decimal(holding.get('average_price'))
+                last_price = self._decimal(holding.get('last_price'))
+                current_value = quantity * last_price
+                investment = quantity * average_price
+                pnl = self._decimal(holding.get('pnl'))
+                if holding.get('pnl') is None:
+                    pnl = current_value - investment
+
+                identity = holding.get('isin') or symbol
+                processed_holdings.append({
+                    'holding_key': f"mf:{folio or 'no-folio'}:{identity}",
+                    'tradingsymbol': symbol[:100],
+                    'exchange': 'MF',
+                    'isin': holding.get('isin'),
+                    'folio': folio,
+                    'instrument_type': 'mf',
+                    'market': 'IN',
+                    'currency': 'INR',
+                    'quantity': quantity,
+                    'average_price': average_price,
+                    'last_price': last_price,
+                    'last_price_date': self._date(holding.get('last_price_date')),
+                    'pnl': pnl,
+                    'pnl_percentage': pnl / investment * 100 if investment else 0,
+                    'day_change': 0,
+                    'day_change_percentage': 0,
+                    'current_value': current_value,
+                    'source': 'kite_mf',
+                })
+            logger.info("Fetched %s mutual-fund holdings", len(processed_holdings))
+            return processed_holdings
+        except Exception:
+            logger.error("Kite mutual-fund fetch failed")
+            raise
+
+    def get_holdings(self) -> List[Dict]:
+        """Fetch equities and Coin mutual funds through their distinct APIs."""
+        return self.get_equity_holdings() + self.get_mutual_fund_holdings()
 
     def get_positions(self) -> Dict:
         """
@@ -121,8 +207,8 @@ class KiteService:
             positions = self.kite.positions()
             logger.info("Fetched positions successfully")
             return positions
-        except Exception as e:
-            logger.error(f"Error fetching positions: {e}")
+        except Exception:
+            logger.error("Kite positions fetch failed")
             raise
 
     def get_historical_data(
@@ -166,8 +252,8 @@ class KiteService:
             logger.info(f"Fetched {len(df)} historical records for {instrument_token}")
             return df
 
-        except Exception as e:
-            logger.error(f"Error fetching historical data: {e}")
+        except Exception:
+            logger.error("Kite historical-data fetch failed")
             raise
 
     def get_instruments(self, exchange: str = "NSE") -> pd.DataFrame:
@@ -185,8 +271,8 @@ class KiteService:
             df = pd.DataFrame(instruments)
             logger.info(f"Fetched {len(df)} instruments for {exchange}")
             return df
-        except Exception as e:
-            logger.error(f"Error fetching instruments: {e}")
+        except Exception:
+            logger.error("Kite instruments fetch failed")
             raise
 
     def get_quote(self, symbols: List[str]) -> Dict:
@@ -205,8 +291,8 @@ class KiteService:
         try:
             quotes = self.kite.quote(symbols)
             return quotes
-        except Exception as e:
-            logger.error(f"Error fetching quotes: {e}")
+        except Exception:
+            logger.error("Kite quote fetch failed")
             raise
 
     def get_profile(self) -> Dict:
@@ -222,8 +308,8 @@ class KiteService:
         try:
             profile = self.kite.profile()
             return profile
-        except Exception as e:
-            logger.error(f"Error fetching profile: {e}")
+        except Exception:
+            logger.error("Kite profile fetch failed")
             raise
 
     @staticmethod
@@ -242,9 +328,13 @@ class KiteService:
         for attempt in range(max_attempts):
             try:
                 return func()
-            except Exception as e:
+            except Exception:
                 if attempt == max_attempts - 1:
                     raise
                 wait_time = delay * (2 ** attempt)
-                logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")
+                logger.warning(
+                    "Kite request attempt %s failed; retrying in %ss",
+                    attempt + 1,
+                    wait_time,
+                )
                 time.sleep(wait_time)

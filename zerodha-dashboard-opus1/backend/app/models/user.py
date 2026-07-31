@@ -24,6 +24,11 @@ class User(db.Model):
     bank_accounts = db.relationship('BankAccount', back_populates='user', lazy='dynamic',
                                    cascade='all, delete-orphan')
     accounts = db.relationship('Account', back_populates='user', lazy='dynamic')
+    revoked_tokens = db.relationship(
+        'RevokedToken',
+        cascade='all, delete-orphan',
+        passive_deletes=True,
+    )
 
     def __repr__(self):
         return f'<User {self.email}>'
@@ -40,7 +45,10 @@ class User(db.Model):
 
     def set_password(self, password):
         """Hash and set user password"""
-        self.password_hash = generate_password_hash(password)
+        # PBKDF2 is available on every supported Python/OpenSSL build.  Werkzeug's
+        # default scrypt backend is not present in some system Python builds,
+        # which previously made registration fail at runtime.
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
 
     def check_password(self, password):
         """Verify password against stored hash"""

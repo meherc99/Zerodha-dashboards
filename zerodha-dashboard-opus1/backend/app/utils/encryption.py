@@ -3,6 +3,7 @@ Encryption utility for securing API credentials.
 Uses Fernet (symmetric encryption) from cryptography library.
 """
 from cryptography.fernet import Fernet
+from flask import current_app, has_app_context
 import os
 
 
@@ -79,13 +80,15 @@ class CredentialEncryption:
         return Fernet.generate_key().decode()
 
 
-# Singleton instance for app-wide use
-_encryptor = None
-
-
 def get_encryptor():
-    """Get singleton encryption instance"""
-    global _encryptor
-    if _encryptor is None:
-        _encryptor = CredentialEncryption()
-    return _encryptor
+    """Build an encryptor from the active app's key.
+
+    Reading the current configuration avoids leaking a cached key between test
+    apps and supports deliberate key changes between process restarts.
+    """
+    encryption_key = (
+        current_app.config.get('ENCRYPTION_KEY')
+        if has_app_context()
+        else os.environ.get('ENCRYPTION_KEY')
+    )
+    return CredentialEncryption(encryption_key)

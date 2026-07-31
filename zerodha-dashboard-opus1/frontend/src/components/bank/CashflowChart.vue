@@ -17,6 +17,7 @@ import {
   Legend
 } from 'chart.js'
 import { format, parseISO } from 'date-fns'
+import { formatCurrency } from '@/utils/currency'
 
 ChartJS.register(
   CategoryScale,
@@ -36,11 +37,16 @@ const props = defineProps({
   title: {
     type: String,
     default: 'Weekly Cashflow'
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
 const chartData = computed(() => {
   const labels = props.data.map(d => {
+    if (d.period) return d.period
     try {
       return `Week ${format(parseISO(d.week_start), 'MMM dd')}`
     } catch {
@@ -109,7 +115,7 @@ const chartOptions = {
       cornerRadius: 8,
       callbacks: {
         label: (context) => {
-          return `${context.dataset.label}: ₹${context.parsed.y.toLocaleString('en-IN', {
+          return `${context.dataset.label}: ${formatCurrency(context.parsed.y, props.currency, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
           })}`
@@ -118,7 +124,7 @@ const chartOptions = {
           const income = tooltipItems[0]?.parsed.y || 0
           const expense = tooltipItems[1]?.parsed.y || 0
           const net = income - expense
-          return `Net: ₹${net.toLocaleString('en-IN', {
+          return `Net: ${formatCurrency(net, props.currency, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
           })}`
@@ -143,7 +149,10 @@ const chartOptions = {
         color: 'rgba(0, 0, 0, 0.05)'
       },
       ticks: {
-        callback: (value) => `₹${(value / 1000).toFixed(0)}k`,
+        callback: value => formatCurrency(value, props.currency, {
+          maximumFractionDigits: 0,
+          notation: 'compact'
+        }),
         font: {
           size: 11
         }

@@ -1,238 +1,266 @@
-# Getting Started with Zerodha Portfolio Dashboard
+# Getting Started
 
-Welcome! This guide will help you set up and run your Zerodha Portfolio Dashboard.
+This guide takes a new checkout from an empty local database to an authenticated family portfolio.
 
 ## Prerequisites
 
-Before you begin, ensure you have:
+- Python 3.10 or newer (3.11+ recommended)
+- Node.js 20.19+ or 22.12+ (Node.js 24 LTS is also supported)
+- A Kite Connect application if you want to sync Zerodha and Coin holdings
+- A Finnhub API key if you want live US quote refreshes
 
-1. **Python 3.9+** installed
-2. **Node.js 18+** installed
-3. **Zerodha Kite Connect API** subscription
-   - Sign up at https://kite.trade/
-   - Cost: ₹2000/month
-   - You'll get: `api_key`, `api_secret`, and need to generate `access_token`
+You can run and test the application without brokerage credentials, but live Zerodha sync requires a valid Kite application.
 
-## Step-by-Step Setup
+## 1. Configure the Backend
 
-### 1. Backend Setup (5 minutes)
+Run these commands from the project root:
 
 ```bash
-# Navigate to backend directory
-cd /Users/mchanglani/Documents/zerodha-dashboard/backend
-
-# Activate virtual environment (already created)
+cd backend
+python3 -m venv venv
 source venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+```
 
-# The environment is already configured with .env file
-# Dependencies are already installed
+On Windows PowerShell, activate the environment with:
 
-# Start the backend server
+```powershell
+venv\Scripts\Activate.ps1
+```
+
+Generate three different secrets:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Edit `backend/.env` and assign the first random value to `SECRET_KEY`, the second to `JWT_SECRET_KEY`, and the Fernet value to `ENCRYPTION_KEY`. The development defaults for the remaining settings are usable locally.
+
+If you plan to refresh US prices, also set:
+
+```env
+FINNHUB_API_KEY=your-finnhub-api-key
+```
+
+Do not commit `.env`. Keep the Fernet key stable: it is required to decrypt saved Kite credentials.
+
+## 2. Apply Database Migrations
+
+From `backend`, with the virtual environment active:
+
+```bash
+python -m alembic upgrade head
+```
+
+Alembic uses the same resolved `DATABASE_URL` as the Flask application. The default SQLite URL creates the database under Flask’s `backend/instance` directory. For PostgreSQL, set `DATABASE_URL` before running the migration.
+
+Use migrations for schema setup and upgrades; do not replace them with an ad hoc `db.create_all()` workflow. Back up an existing database before upgrading it.
+
+## 3. Start the Backend
+
+```bash
 python run.py
 ```
 
-✅ Backend should now be running on **http://localhost:5000**
-
-You should see:
-```
-* Running on http://0.0.0.0:5000
-Scheduler started. Syncing every 12 hours.
-```
-
-### 2. Frontend Setup (2 minutes)
-
-Open a **new terminal window**:
+The API is available at `http://localhost:5000`. Check it with:
 
 ```bash
-# Navigate to frontend directory
-cd /Users/mchanglani/Documents/zerodha-dashboard/frontend
-
-# Dependencies are already installed
-# Start the development server
-npm run dev
+curl http://localhost:5000/api/health
 ```
 
-✅ Frontend should now be running on **http://localhost:5173**
+`run.py` starts the periodic scheduler when `SCHEDULER_ENABLED=true`. The application factory used by tests and Alembic does not start it.
 
-You should see:
-```
-VITE v5.x.x  ready in xxx ms
+## 4. Configure and Start the Frontend
 
-➜  Local:   http://localhost:5173/
-➜  Network: use --host to expose
-```
+Open another terminal at the project root:
 
-### 3. Add Your First Zerodha Account
-
-1. Open your browser and go to **http://localhost:5173**
-2. Click on **"Accounts"** in the navigation
-3. Click **"+ Add Account"** button
-4. Fill in the form:
-   - **Account Name**: e.g., "My Portfolio"
-   - **API Key**: Your Kite Connect API key
-   - **API Secret**: Your Kite Connect API secret
-   - **Access Token**: Your access token (see below for how to get this)
-
-### 4. Getting Your Access Token
-
-Zerodha access tokens expire daily. Here's how to get one:
-
-**Option 1: Use the backend workflow (recommended)**
-1. Enter your API key and secret in the Accounts page
-2. Click **Open Zerodha Login** to visit the Kite login page
-3. After login, copy the `request_token` from the redirect URL
-4. Paste the `request_token` into the form and click **Generate Access Token**
-5. Save the account
-
-**Option 2: Generate it directly via API**
-1. Call `POST /api/auth/login-url` with your API key
-2. Log into Zerodha and obtain the `request_token`
-3. Call `POST /api/auth/access-token` with API key, API secret, and `request_token`
-
-**Note**: You'll need to refresh your access token daily. We recommend setting up a script to automate this.
-
-### 5. Sync Your Holdings
-
-After adding your account:
-1. Go back to **"Dashboard"**
-2. Select your account from the dropdown
-3. Click **"🔄 Sync"** button
-4. Wait for the sync to complete (10-30 seconds)
-
-✅ You should now see your portfolio data!
-
-## What You Should See
-
-### Dashboard
-- **Portfolio Summary Cards**: Total value, P&L, day change, holdings count
-- **Pie Chart**: Portfolio allocation by stock
-- **Bar Chart**: Sector-wise breakdown
-- **Line Chart**: Portfolio value over time (will populate after multiple syncs)
-- **Performance Heatmap**: Visual representation of winners/losers
-- **Holdings Table**: Detailed list with sorting and filtering
-
-### Auto-Sync
-- The system will automatically sync all active accounts every 12 hours
-- You can manually trigger sync anytime using the "Sync" button
-- Each sync creates a snapshot for historical tracking
-
-## Common Issues & Solutions
-
-### Backend won't start
-
-**Problem**: `ModuleNotFoundError: No module named 'flask'`
-**Solution**:
-```bash
-cd backend
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-**Problem**: `ValueError: Encryption key not provided`
-**Solution**: Check that `.env` file exists in backend directory with `ENCRYPTION_KEY` set
-
-### Frontend won't start
-
-**Problem**: `Cannot find module 'vue'`
-**Solution**:
 ```bash
 cd frontend
 npm install
 ```
 
-### API Connection Error
+The frontend defaults to `http://localhost:5000/api`. To override it, create `frontend/.env.local`:
 
-**Problem**: Frontend shows "Failed to fetch..."
-**Solution**:
-- Ensure backend is running on port 5000
-- Check `.env` file in frontend has correct `VITE_API_BASE_URL`
-- Check browser console for CORS errors
-
-### Zerodha API Errors
-
-**Problem**: "Invalid access token"
-**Solution**: Access tokens expire daily. Generate a new one and update your account.
-
-**Problem**: "Rate limit exceeded"
-**Solution**: Zerodha limits API calls. Wait a few minutes before retrying.
-
-## Adding Family Member Accounts
-
-To track multiple family accounts:
-
-1. Go to **Accounts** page
-2. Click **"+ Add Account"** for each family member
-3. Each account needs its own Kite Connect API credentials
-4. All accounts will be aggregated in the "All Accounts" view
-5. You can switch between individual accounts using the dropdown
-
-## Next Steps
-
-### Daily Usage
-1. Open http://localhost:5173 in your browser
-2. View your dashboard
-3. The system auto-syncs every 12 hours
-4. You can manually sync anytime
-
-### Weekly Review
-- Check performance metrics
-- Review top and worst performers
-- Analyze sector allocation
-- Track portfolio value trends
-
-### Monthly Analysis
-- Review historical performance
-- Check correlation between stocks
-- Rebalance if needed based on sector allocation
-
-## Advanced Configuration
-
-### Change Sync Interval
-
-Edit `backend/.env`:
 ```env
-SYNC_INTERVAL_HOURS=6  # Sync every 6 hours instead of 12
+VITE_API_BASE_URL=http://localhost:5000/api
 ```
 
-Restart backend for changes to take effect.
+Start the development server:
 
-### Use PostgreSQL Instead of SQLite
+```bash
+npm run dev
+```
 
-For production or better performance:
+Open `http://localhost:5173`.
 
-1. Install PostgreSQL
-2. Create a database:
-   ```sql
-   CREATE DATABASE zerodha_dashboard;
-   ```
-3. Update `backend/.env`:
-   ```env
-   DATABASE_URL=postgresql://username:password@localhost:5432/zerodha_dashboard
-   ```
-4. Restart backend
+## 5. Register a Dashboard User
 
-### Deploy to Production
+Select **Register**, then provide:
 
-See `docs/DEPLOYMENT.md` for instructions on deploying to cloud services.
+- a valid email address;
+- a password between 8 and 1024 characters;
+- an optional full name.
 
-## Getting Help
+Registration returns an application JWT and signs the browser in. Login restores the user with `GET /api/auth/me`; invalid, logged-out, or inactive-user tokens are rejected. Portfolio data belonging to another user cannot be selected by changing an account ID.
 
-- Check `README.md` for general information
-- See `backend/README.md` for backend-specific docs
-- See `frontend/README.md` for frontend-specific docs
-- Review API endpoints in backend code
-- Check browser console for errors
+## 6. Connect a Zerodha Account
 
-## Tips for Best Experience
+Open **Accounts** and start a new account:
 
-1. **Keep Access Tokens Updated**: Set a daily reminder to refresh tokens
-2. **Regular Syncs**: Use manual sync after making trades
-3. **Historical Data**: The longer you use the dashboard, the better the trends
-4. **Multiple Accounts**: Add all family accounts for consolidated view
-5. **Bookmark It**: Add http://localhost:5173 to your bookmarks
+1. Enter a family-facing account name, the Kite API key, and the Kite API secret.
+2. Select **Open Zerodha Login**. The frontend accepts only an HTTPS login URL on `kite.zerodha.com`.
+3. Complete the login on Zerodha.
+4. Copy the one-time `request_token` query parameter from the redirect URL.
+5. Paste the request token into the account form and save.
 
----
+The browser sends the request token to the account endpoint. The backend uses
+it once to obtain a Kite access token, discards the one-time request token,
+encrypts the API key, API secret, and access token, and returns only
+nonsensitive account metadata.
 
-**🎉 Congratulations!** Your Zerodha Portfolio Dashboard is now running!
+Do not call `POST /api/auth/access-token`: that legacy endpoint intentionally returns `410 Gone` so brokerage access tokens are never sent back to the browser.
 
-Enjoy tracking your investments with beautiful visualizations and comprehensive analytics.
+To renew an expired Kite session, select **Reconnect** on the existing account.
+The backend creates the login URL from that account’s encrypted API key, so the
+browser does not need the stored key or secret. Complete the login and submit
+the new one-time request token to update the same account.
+
+## 7. Sync and Choose Portfolio Scope
+
+On the Dashboard:
+
+- choose **Family** to combine the latest completed snapshot from each active account owned by the signed-in user;
+- choose **Member**, then select one family account, to inspect or refresh only that account;
+- select **Sync portfolio** to fetch Kite equities and Coin mutual funds.
+
+Each account sync creates its own snapshot. Family history and current holdings are assembled from account-scoped data, so a partial failure does not replace a successful sibling account snapshot.
+
+Mutual-fund data is fetched from Kite’s mutual-fund holdings API. Fractional units are preserved, and positions with different folios are not collapsed into one holding.
+
+## 8. Use the Asset Pages
+
+The authenticated dashboard contains:
+
+- **Overview**: domestic INR and US USD summaries shown separately, allocation charts, performance views, and recent holdings;
+- **Indian Stocks**: searchable, filterable, and sortable domestic equity holdings;
+- **Mutual Funds**: dedicated INR fund summary, folio-aware holdings, allocation, and return views;
+- **US Stocks**: USD-only holdings, workbook import, quote provenance, and price refresh;
+- **Fixed Deposits**: INR principal, simple-interest accrual, maturity details, workbook import, and recalculation;
+- **Bank Balances**: owned bank accounts, statements, transactions, and analytics.
+
+Tables adapt to mobile cards on narrow screens. Search, asset type, profit/loss filtering, sortable columns, and ascending/descending controls are available where applicable.
+
+## 9. Import US Holdings
+
+Create a complete `.xlsx` or `.xls` workbook for one account:
+
+| Column | Required | Example |
+| --- | --- | --- |
+| `Symbol` | Yes | `AAPL` |
+| `Quantity` | Yes | `2.5` |
+| `Average Price` | Yes | `182.50` |
+| `Purchase Date` | No | `2025-01-15` |
+
+Select the destination account explicitly when the dashboard is in Family scope.
+
+Important: every upload replaces the selected account’s current US holdings list. Include every current US position in the workbook. Validation is atomic: malformed rows, duplicate symbols, or more than 100 positions reject the whole workbook without replacing the previous snapshot. The snapshot carries the account’s other asset classes forward. Values are stored and displayed in USD; they are not added to INR totals. When a quote cannot be retrieved, the UI identifies the position as valued at import cost.
+
+## 10. Import Fixed Deposits
+
+Create a complete `.xlsx` or `.xls` workbook:
+
+| Column | Required | Example |
+| --- | --- | --- |
+| `Bank Name` | Yes | `HDFC Bank` |
+| `Investment Amount` | Yes | `250000` |
+| `Investment Date` | Yes | `2025-01-15` |
+| `Interest Rate` | Yes | `7.25` |
+| `Maturity Date` | No | `2027-01-15` |
+| `Deposit ID` | No | `FD-2025-001` |
+
+The amount must be positive, the rate must be greater than zero and no more than 100, and maturity cannot precede investment.
+
+An FD upload is also a complete replacement for that account’s FD list. Every
+non-empty row must be valid and `Deposit ID` values must be unique; otherwise
+the existing FD snapshot is left untouched. The service uses simple interest
+and stops accrual at maturity. The displayed current value is an estimate: it
+does not model compounding, payout schedules, taxes, or bank-specific terms.
+All values remain in INR.
+
+Both import types require an authenticated, owned destination account. Files are size-limited, extension-, signature-, member-count-, and expanded-size-checked, processed through randomized temporary paths, and deleted after processing.
+
+## 11. Run the Test Suites
+
+Backend:
+
+```bash
+cd backend
+source venv/bin/activate
+python -m pytest tests
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm test
+npm run build
+```
+
+Use `npm run test:watch` while developing frontend tests.
+
+## Troubleshooting
+
+### `ModuleNotFoundError` when starting the backend
+
+Activate `backend/venv` and reinstall:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+### Encryption-key errors
+
+`ENCRYPTION_KEY` must be a valid Fernet key. Generate it with the command in step 1. If the database already contains encrypted credentials, use the same key that created them.
+
+### The frontend receives connection or CORS errors
+
+- Confirm that the backend is listening on port 5000.
+- Confirm `VITE_API_BASE_URL` ends in `/api`.
+- Confirm `CORS_ORIGINS` includes the exact frontend origin, including its port.
+- Restart both processes after changing environment files.
+
+### Registration or login is rate-limited
+
+Registration and login endpoints have IP-based limits. Wait for the window to expire rather than retrying continuously.
+
+### Zerodha sync reports an expired or invalid session
+
+Open the account editor, complete the Kite login again, and submit a fresh request token. Request tokens are one-time values.
+
+### A US quote is missing
+
+Check `FINNHUB_API_KEY` and the provider’s response or rate limits. Imported positions remain visible at cost with their source status instead of being silently dropped.
+
+### A portfolio page looks empty after an import
+
+Confirm the Family/Member scope and the destination account selected during upload. US and FD workbooks replace only that asset class for the chosen account.
+
+## Production Checklist
+
+- Set `FLASK_ENV=production`.
+- Use strong independent `SECRET_KEY` and `JWT_SECRET_KEY` values and a protected Fernet key.
+- Run `python -m alembic upgrade head` against the production database before deploying the new process.
+- Serve the frontend and API over HTTPS.
+- Restrict `CORS_ORIGINS` to trusted frontend origins.
+- Set `RATELIMIT_STORAGE=database`; production startup rejects process-local
+  counters.
+- Use an unprivileged service account and private database/upload permissions.
+- Put upload and request-size limits at both the reverse proxy and Flask layers.
+- Keep `RATELIMIT_ENABLED=true`; SQL-backed counters are shared across web
+  workers and restarts. An additional edge limit remains recommended.
+- Run only one scheduler instance, or set `SCHEDULER_ENABLED=false` in ordinary web workers.
+- Keep JWTs and all Kite tokens out of logs, diagnostics, URLs, and support captures.

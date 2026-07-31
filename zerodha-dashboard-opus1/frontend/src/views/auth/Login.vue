@@ -11,6 +11,7 @@
             id="email"
             v-model="email"
             type="email"
+            autocomplete="email"
             placeholder="your@email.com"
             required
             autofocus
@@ -23,6 +24,7 @@
             id="password"
             v-model="password"
             type="password"
+            autocomplete="current-password"
             placeholder="Enter your password"
             required
           />
@@ -32,7 +34,7 @@
           {{ loading ? 'Logging in...' : 'Login' }}
         </button>
 
-        <p v-if="error" class="error-message">{{ error }}</p>
+        <p v-if="error" class="error-message" role="alert">{{ error }}</p>
       </form>
 
       <p class="auth-link">
@@ -45,12 +47,13 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 const { loading, error: authError } = storeToRefs(authStore)
 
 const email = ref('')
@@ -63,10 +66,13 @@ const handleLogin = async () => {
 
   try {
     await authStore.login(email.value, password.value)
-    router.push('/dashboard')
-  } catch (err) {
+    const requestedPath = String(route.query.redirect || '')
+    const destination = requestedPath.startsWith('/') && !requestedPath.startsWith('//')
+      ? requestedPath
+      : '/dashboard/overview'
+    await router.replace(destination)
+  } catch {
     // Error is already set in the store
-    console.error('Login error:', err)
   }
 }
 </script>

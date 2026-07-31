@@ -5,6 +5,7 @@ import pytest
 import json
 from datetime import datetime
 from app import create_app, db
+from app.models.revoked_token import RevokedToken
 from app.models.user import User
 from flask_jwt_extended import decode_token
 
@@ -12,11 +13,12 @@ from flask_jwt_extended import decode_token
 @pytest.fixture
 def app():
     """Create and configure test app"""
-    app = create_app()
-    app.config.update({
+    app = create_app({
         'TESTING': True,
         'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
-        'JWT_SECRET_KEY': 'test-jwt-secret-key',
+        'JWT_SECRET_KEY': 'test-jwt-secret-key-at-least-32-bytes',
+        'SECRET_KEY': 'test-secret-key',
+        'SCHEDULER_ENABLED': False,
     })
 
     with app.app_context():
@@ -182,6 +184,35 @@ class TestRegistration:
             user = User.query.filter_by(email='jwt@example.com').first()
             assert decoded['sub'] == str(user.id)  # JWT identity is stored as string
 
+    @pytest.mark.parametrize(
+        'payload',
+        [
+            {'email': 123, 'password': 'password123'},
+            {'email': '@example.com', 'password': 'password123'},
+            {'email': 'user@', 'password': 'password123'},
+            {'email': 'user@example.com', 'password': 123},
+            {
+                'email': 'user@example.com',
+                'password': 'password123',
+                'full_name': 123,
+            },
+            {
+                'email': 'user@example.com',
+                'password': 'password123',
+                'is_admin': True,
+            },
+        ],
+    )
+    def test_registration_rejects_malformed_or_unknown_fields(
+        self,
+        client,
+        payload,
+    ):
+        response = client.post('/api/auth/register', json=payload)
+
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+
 
 class TestLogin:
     """Tests for POST /api/auth/login endpoint"""
@@ -300,6 +331,20 @@ class TestLogin:
         assert 'error' in data
         assert 'inactive' in data['error'].lower()
 
+    def test_login_rate_limit_has_retry_after_header(self, client):
+        payload = {
+            'email': 'missing@example.com',
+            'password': 'password123',
+        }
+        for _ in range(10):
+            assert client.post('/api/auth/login', json=payload).status_code == 401
+
+        response = client.post('/api/auth/login', json=payload)
+
+        assert response.status_code == 429
+        assert int(response.headers['Retry-After']) >= 1
+        assert response.get_json()['error'] == 'Rate limit exceeded'
+
 
 class TestGetCurrentUser:
     """Tests for GET /api/auth/me endpoint"""
@@ -348,8 +393,8 @@ class TestLogout:
 
         assert response.status_code == 401  # Should require JWT token
 
-    def test_logout_with_token(self, client, sample_user):
-        """Test logout with valid token (client-side deletion)"""
+    def test_logout_with_token(self, client, sample_user, app):
+        """Logout persists revocation and prevents replay until JWT expiry."""
         # Login first
         login_response = client.post('/api/auth/login',
                                       data=json.dumps({
@@ -366,3 +411,17 @@ class TestLogout:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert 'message' in data
+
+        replay = client.get(
+            '/api/auth/me',
+            headers={'Authorization': f'Bearer {token}'},
+        )
+        assert replay.status_code == 401
+        assert replay.get_json()['error'] == (
+            'Authentication token has been revoked'
+        )
+
+        with app.app_context():
+            revoked = RevokedToken.query.one()
+            assert revoked.user_id == int(decode_token(token)['sub'])
+            assert revoked.expires_at > datetime.utcnow()

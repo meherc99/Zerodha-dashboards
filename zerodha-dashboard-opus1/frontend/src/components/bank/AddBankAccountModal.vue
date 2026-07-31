@@ -56,7 +56,7 @@
         <div class="form-group">
           <label for="current-balance">Current Balance (Optional)</label>
           <div class="input-with-prefix">
-            <span class="prefix">₹</span>
+            <span class="prefix">{{ currencySymbol }}</span>
             <input
               id="current-balance"
               v-model.number="form.currentBalance"
@@ -114,8 +114,9 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useBankAccountsStore } from '@/stores/bankAccounts'
+import { createCurrencyFormatter } from '@/utils/currency'
 
 const props = defineProps({
   isOpen: {
@@ -139,6 +140,11 @@ const form = ref({
 const errors = ref({})
 const error = ref(null)
 const loading = ref(false)
+const currencySymbol = computed(() => {
+  return createCurrencyFormatter(form.value.currency)
+    .formatToParts(0)
+    .find(part => part.type === 'currency')?.value || form.value.currency
+})
 
 function validateForm() {
   errors.value = {}
@@ -192,7 +198,6 @@ async function handleSubmit() {
     resetForm()
   } catch (err) {
     error.value = err.response?.data?.error || 'Failed to add bank account. Please try again.'
-    console.error('Error adding bank account:', err)
   } finally {
     loading.value = false
   }

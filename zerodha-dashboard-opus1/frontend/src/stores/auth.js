@@ -1,16 +1,33 @@
 import { defineStore } from 'pinia'
-import api from '@/services/api'
+import api, { resetApiSession } from '@/services/api'
+import {
+  clearAuthToken,
+  getAuthToken,
+  setAuthToken
+} from '@/utils/authSession'
+import { useAccountsStore } from '@/stores/accounts'
+import { useBankAccountsStore } from '@/stores/bankAccounts'
+import { useCategoriesStore } from '@/stores/categories'
+import { useHoldingsStore } from '@/stores/holdings'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null,
-    token: localStorage.getItem('token'),
-    isAuthenticated: !!localStorage.getItem('token'),
+    token: getAuthToken(),
+    isAuthenticated: false,
+    authReady: false,
     loading: false,
     error: null
   }),
 
   actions: {
+    clearUserData() {
+      useAccountsStore().$reset()
+      useBankAccountsStore().$reset()
+      useCategoriesStore().$reset()
+      useHoldingsStore().$reset()
+    },
+
     async register(email, password, fullName) {
       this.loading = true
       this.error = null
@@ -44,10 +61,13 @@ export const useAuthStore = defineStore('auth', {
     },
 
     setAuth(data) {
+      resetApiSession()
+      this.clearUserData()
       this.user = data.user
       this.token = data.access_token
       this.isAuthenticated = true
-      localStorage.setItem('token', data.access_token)
+      this.authReady = true
+      setAuthToken(data.access_token)
 
       // Set default Authorization header
       api.defaults.headers.common['Authorization'] = `Bearer ${data.access_token}`
@@ -56,35 +76,53 @@ export const useAuthStore = defineStore('auth', {
     async logout() {
       try {
         await api.post('/auth/logout')
-      } catch (error) {
-        // Logout even if API call fails
+      } catch {
+        // Local cleanup is authoritative even when the remote session is unavailable.
+      } finally {
+        this.clearSession()
       }
-
-      this.user = null
-      this.token = null
-      this.isAuthenticated = false
-      localStorage.removeItem('token')
-      delete api.defaults.headers.common['Authorization']
     },
 
     async fetchCurrentUser() {
-      if (!this.token) return
+      if (!this.token) return false
 
       try {
         const response = await api.get('/auth/me')
         this.user = response.data
-      } catch (error) {
-        // Token invalid, logout
-        this.logout()
+        this.isAuthenticated = true
+        return true
+      } catch {
+        this.clearSession()
+        return false
       }
     },
 
-    initializeAuth() {
-      // Called on app start to restore auth from localStorage
-      if (this.token) {
-        api.defaults.headers.common['Authorization'] = `Bearer ${this.token}`
-        this.fetchCurrentUser()
+    async initializeAuth() {
+      this.authReady = false
+      this.token = getAuthToken()
+
+      if (!this.token) {
+        this.clearSession()
+        this.authReady = true
+        return false
       }
+
+      api.defaults.headers.common.Authorization = `Bearer ${this.token}`
+      try {
+        return await this.fetchCurrentUser()
+      } finally {
+        this.authReady = true
+      }
+    },
+
+    clearSession() {
+      resetApiSession()
+      this.clearUserData()
+      this.user = null
+      this.token = null
+      this.isAuthenticated = false
+      clearAuthToken()
+      delete api.defaults.headers.common.Authorization
     },
 
     clearError() {

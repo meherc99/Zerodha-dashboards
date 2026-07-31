@@ -38,7 +38,11 @@ class ParsingTemplate(db.Model):
     last_used_at = db.Column(db.DateTime)
     created_from_statement_id = db.Column(
         db.Integer,
-        db.ForeignKey('bank_statements.id'),
+        db.ForeignKey(
+            'bank_statements.id',
+            name='fk_parsing_templates_created_statement',
+            use_alter=True,
+        ),
         nullable=True
     )
     is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)

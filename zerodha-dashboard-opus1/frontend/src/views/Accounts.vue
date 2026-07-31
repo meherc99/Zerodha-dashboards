@@ -2,7 +2,7 @@
   <div class="accounts-page">
     <div class="page-header">
       <h1>Account Management</h1>
-      <button @click="showAddModal = true" class="add-btn">+ Add Account</button>
+      <button type="button" @click="showAddModal = true" class="add-btn">+ Add Account</button>
     </div>
 
     <LoadingSpinner v-if="accountsStore.loading && !accountsStore.accounts.length" />
@@ -31,6 +31,13 @@
           <button @click="toggleAccountStatus(account)" class="action-btn">
             {{ account.is_active ? 'Deactivate' : 'Activate' }}
           </button>
+          <button
+            type="button"
+            class="action-btn reconnect"
+            @click="openReconnectModal(account)"
+          >
+            Reconnect
+          </button>
         </div>
       </div>
 
@@ -43,11 +50,17 @@
     </div>
 
     <!-- Add Account Modal -->
-    <div v-if="showAddModal" class="modal-overlay" @click="showAddModal = false">
-      <div class="modal" @click.stop>
+    <div v-if="showAddModal" class="modal-overlay" @click="closeAddModal">
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-account-title"
+        @click.stop
+      >
         <div class="modal-header">
-          <h2>Add Zerodha Account</h2>
-          <button @click="showAddModal = false" class="close-btn">&times;</button>
+          <h2 id="add-account-title">Add Zerodha Account</h2>
+          <button type="button" aria-label="Close add-account dialog" @click="closeAddModal" class="close-btn">&times;</button>
         </div>
         <form @submit.prevent="handleAddAccount" class="modal-body">
           <div class="form-group">
@@ -56,6 +69,7 @@
               id="account-name"
               v-model="newAccount.account_name"
               type="text"
+              autocomplete="off"
               placeholder="e.g., Family Member 1"
               required
             />
@@ -76,6 +90,7 @@
               id="api-secret"
               v-model="newAccount.api_secret"
               type="password"
+              autocomplete="new-password"
               placeholder="Your Kite Connect API Secret"
               required
             />
@@ -89,41 +104,90 @@
             >
               {{ authLoading ? 'Opening...' : 'Open Zerodha Login' }}
             </button>
-            <button
-              type="button"
-              class="secondary-btn"
-              @click="handleGenerateAccessToken"
-              :disabled="authLoading || !newAccount.api_key || !newAccount.api_secret || !newAccount.request_token"
-            >
-              {{ authLoading ? 'Generating...' : 'Generate Access Token' }}
-            </button>
           </div>
           <div class="form-group">
-            <label for="request-token">Request Token</label>
+            <label for="request-token">Request Token *</label>
             <input
               id="request-token"
               v-model="newAccount.request_token"
-              type="text"
+              type="password"
+              autocomplete="off"
               placeholder="Paste the request_token from the Zerodha redirect URL"
+              required
             />
-            <small>Use the login button above to authenticate with Zerodha, then paste the request_token here if you want the backend to generate the access token for you.</small>
-          </div>
-          <div class="form-group">
-            <label for="access-token">Access Token</label>
-            <input
-              id="access-token"
-              v-model="newAccount.access_token"
-              type="text"
-              placeholder="Leave blank if you want the backend to generate it from the request token"
-            />
-            <small>Access tokens expire daily. You can paste one directly or generate it from the request token.</small>
+            <small>The request token is sent once to this app’s backend, which exchanges and encrypts the access token. The access token is never returned to browser JavaScript.</small>
           </div>
           <div class="modal-actions">
-            <button type="button" @click="showAddModal = false" class="cancel-btn">
+            <button type="button" @click="closeAddModal" class="cancel-btn">
               Cancel
             </button>
             <button type="submit" :disabled="accountsStore.loading" class="submit-btn">
               {{ accountsStore.loading ? 'Adding...' : 'Add Account' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div v-if="reconnectAccount" class="modal-overlay" @click="closeReconnectModal">
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reconnect-account-title"
+        @click.stop
+      >
+        <div class="modal-header">
+          <h2 id="reconnect-account-title">
+            Reconnect {{ reconnectAccount.account_name }}
+          </h2>
+          <button
+            type="button"
+            aria-label="Close reconnect dialog"
+            class="close-btn"
+            @click="closeReconnectModal"
+          >
+            &times;
+          </button>
+        </div>
+        <form class="modal-body" @submit.prevent="handleReconnect">
+          <p class="reconnect-copy">
+            Generate a fresh Kite request token, then update this existing
+            account. The stored API key stays server-side and no duplicate
+            account will be created.
+          </p>
+          <div class="helper-actions">
+            <button
+              type="button"
+              class="secondary-btn"
+              :disabled="authLoading"
+              @click="handleOpenReconnectLogin"
+            >
+              {{ authLoading ? 'Opening...' : 'Open Zerodha Login' }}
+            </button>
+          </div>
+          <div class="form-group">
+            <label for="reconnect-request-token">Fresh Request Token *</label>
+            <input
+              id="reconnect-request-token"
+              v-model="reconnectForm.request_token"
+              type="password"
+              autocomplete="off"
+              placeholder="Paste the fresh request_token"
+              required
+            />
+            <small>
+              Only the fresh request token is submitted to update account
+              #{{ reconnectAccount.id }}; the backend exchanges and encrypts
+              the new access token.
+            </small>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="cancel-btn" @click="closeReconnectModal">
+              Cancel
+            </button>
+            <button type="submit" class="submit-btn" :disabled="accountsStore.loading">
+              {{ accountsStore.loading ? 'Reconnecting...' : 'Reconnect account' }}
             </button>
           </div>
         </form>
@@ -139,7 +203,7 @@ import { useHoldingsStore } from '@/stores/holdings'
 import { useUiStore } from '@/stores/ui'
 import { format, parseISO } from 'date-fns'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import api from '@/services/api'
+import { api } from '@/services/api'
 
 const accountsStore = useAccountsStore()
 const holdingsStore = useHoldingsStore()
@@ -147,12 +211,15 @@ const uiStore = useUiStore()
 const authLoading = ref(false)
 
 const showAddModal = ref(false)
+const reconnectAccount = ref(null)
+const reconnectForm = ref({
+  request_token: ''
+})
 const newAccount = ref({
   account_name: '',
   api_key: '',
   api_secret: '',
-  request_token: '',
-  access_token: ''
+  request_token: ''
 })
 
 const formatDate = (dateStr) => {
@@ -163,6 +230,28 @@ const formatDate = (dateStr) => {
   }
 }
 
+const emptyAccountForm = () => ({
+  account_name: '',
+  api_key: '',
+  api_secret: '',
+  request_token: ''
+})
+
+const closeAddModal = () => {
+  showAddModal.value = false
+  newAccount.value = emptyAccountForm()
+}
+
+const openReconnectModal = account => {
+  reconnectAccount.value = account
+  reconnectForm.value = { request_token: '' }
+}
+
+const closeReconnectModal = () => {
+  reconnectAccount.value = null
+  reconnectForm.value = { request_token: '' }
+}
+
 const handleAddAccount = async () => {
   try {
     await accountsStore.createAccount(newAccount.value)
@@ -170,14 +259,7 @@ const handleAddAccount = async () => {
       type: 'success',
       message: 'Account added successfully!'
     })
-    showAddModal.value = false
-    newAccount.value = {
-      account_name: '',
-      api_key: '',
-      api_secret: '',
-      request_token: '',
-      access_token: ''
-    }
+    closeAddModal()
   } catch (error) {
     uiStore.addNotification({
       type: 'error',
@@ -186,20 +268,25 @@ const handleAddAccount = async () => {
   }
 }
 
-const handleOpenLoginUrl = async () => {
+const openTrustedKiteLogin = async loadLoginUrl => {
   let popup = null
 
   try {
     authLoading.value = true
-    popup = window.open('', '_blank')
+    popup = window.open('about:blank', '_blank')
+    if (popup) popup.opener = null
 
-    const response = await api.getLoginUrl({ api_key: newAccount.value.api_key })
-    const loginUrl = response.data.login_url
+    const response = await loadLoginUrl()
+    const loginUrl = new URL(response.data.login_url)
+    const isTrustedKiteUrl = loginUrl.protocol === 'https:' && loginUrl.hostname === 'kite.zerodha.com'
+    if (!isTrustedKiteUrl) {
+      throw new Error('The API returned an untrusted login URL.')
+    }
 
     if (popup) {
-      popup.location.href = loginUrl
+      popup.location.replace(loginUrl.href)
     } else {
-      window.location.href = loginUrl
+      window.location.assign(loginUrl.href)
     }
 
     uiStore.addNotification({
@@ -219,33 +306,43 @@ const handleOpenLoginUrl = async () => {
   }
 }
 
-const handleGenerateAccessToken = async () => {
-  try {
-    authLoading.value = true
-    const response = await api.exchangeAccessToken({
-      api_key: newAccount.value.api_key,
-      api_secret: newAccount.value.api_secret,
-      request_token: newAccount.value.request_token,
-    })
+const handleOpenLoginUrl = () => {
+  return openTrustedKiteLogin(
+    () => api.getLoginUrl({ api_key: newAccount.value.api_key })
+  )
+}
 
-    newAccount.value.access_token = response.data.access_token
+const handleOpenReconnectLogin = () => {
+  if (!reconnectAccount.value) return
+  return openTrustedKiteLogin(
+    () => api.getAccountLoginUrl(reconnectAccount.value.id)
+  )
+}
+
+const handleReconnect = async () => {
+  if (!reconnectAccount.value) return
+  try {
+    await accountsStore.reconnectAccount(
+      reconnectAccount.value.id,
+      reconnectForm.value.request_token
+    )
     uiStore.addNotification({
       type: 'success',
-      message: 'Access token generated successfully!'
+      message: `${reconnectAccount.value.account_name} reconnected successfully.`
     })
-  } catch (error) {
+    closeReconnectModal()
+  } catch {
     uiStore.addNotification({
       type: 'error',
-      message: error.response?.data?.error || 'Failed to generate access token'
+      message: accountsStore.error || 'Failed to reconnect account'
     })
-  } finally {
-    authLoading.value = false
   }
 }
 
 const handleSync = async (accountId) => {
   try {
-    await holdingsStore.syncHoldings(accountId)
+    const result = await holdingsStore.syncHoldings(accountId)
+    if (!result) return
     await accountsStore.fetchAccounts() // Refresh to update last_synced_at
     uiStore.addNotification({
       type: 'success',
@@ -254,7 +351,7 @@ const handleSync = async (accountId) => {
   } catch (error) {
     uiStore.addNotification({
       type: 'error',
-      message: 'Failed to sync account'
+      message: holdingsStore.error || 'Failed to sync account'
     })
   }
 }
@@ -394,6 +491,18 @@ accountsStore.fetchAccounts()
 
 .action-btn.sync:hover {
   background: #2563eb;
+}
+
+.action-btn.reconnect {
+  border-color: #c7d2fe;
+  color: #4338ca;
+}
+
+.reconnect-copy {
+  margin: 0 0 18px;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .empty-state {

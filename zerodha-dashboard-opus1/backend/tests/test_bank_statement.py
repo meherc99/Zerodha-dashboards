@@ -195,7 +195,7 @@ def test_to_dict(app, sample_bank_account):
         assert data['bank_account_id'] == sample_bank_account['id']
         assert data['statement_period_start'] == '2026-01-01'
         assert data['statement_period_end'] == '2026-01-31'
-        assert data['pdf_file_path'] == '/encrypted/path/to/statement.pdf'
+        assert 'pdf_file_path' not in data
         assert data['upload_date'] is not None
         assert data['parsing_template_id'] is None
         assert data['status'] == 'review'

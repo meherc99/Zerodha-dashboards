@@ -16,13 +16,15 @@
 
     <div class="bank-balance">
       <span class="balance-label">Current Balance</span>
-      <span class="balance-value">{{ formatCurrency(bank.balance) }}</span>
+      <span class="balance-value">
+        {{ formatCurrency(bank.current_balance, bank.currency) }}
+      </span>
     </div>
 
     <div v-if="bank.monthly_change" class="bank-change" :class="changeClass">
       <span class="change-label">Monthly Change</span>
       <span class="change-value">
-        {{ bank.monthly_change > 0 ? '+' : '' }}{{ formatCurrency(bank.monthly_change) }}
+        {{ bank.monthly_change > 0 ? '+' : '' }}{{ formatCurrency(bank.monthly_change, bank.currency) }}
         ({{ formatPercentage(bank.monthly_change_percentage) }})
       </span>
     </div>
@@ -81,10 +83,10 @@ const changeClass = computed(() => {
   return props.bank.monthly_change > 0 ? 'positive' : 'negative'
 })
 
-const formatCurrency = (value) => {
+const formatCurrency = (value, currency = 'INR') => {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
-    currency: 'INR',
+    currency: currency || 'INR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value || 0)

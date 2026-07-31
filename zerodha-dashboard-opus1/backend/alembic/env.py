@@ -2,6 +2,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+from dotenv import load_dotenv
 
 from alembic import context
 
@@ -21,6 +22,7 @@ if config.config_file_name is not None:
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 from app import create_app, db
 from app.models.user import User
@@ -34,6 +36,13 @@ app = create_app()
 app.app_context().push()
 
 target_metadata = db.metadata
+
+# Flask-SQLAlchemy resolves relative SQLite paths against the instance
+# directory and runtime deployments commonly override DATABASE_URL. Reuse the
+# fully resolved application URL so Alembic always migrates the same database
+# the API will open.
+database_url = db.engine.url.render_as_string(hide_password=False)
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

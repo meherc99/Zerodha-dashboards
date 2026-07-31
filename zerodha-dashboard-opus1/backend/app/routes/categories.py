@@ -15,19 +15,24 @@ categories_bp = Blueprint('categories', __name__, url_prefix='/api')
 @jwt_required()
 def get_categories():
     """
-    Get all transaction categories.
+    Get the application's public transaction categories.
+
+    Categories are a global system taxonomy. Legacy non-system rows predate
+    user ownership and must not be exposed across tenants.
 
     Returns:
         JSON response with list of categories
     """
     try:
-        categories = TransactionCategory.query.order_by(
+        categories = TransactionCategory.query.filter_by(
+            is_system=True
+        ).order_by(
             TransactionCategory.parent_category_id.asc(),
             TransactionCategory.name.asc()
         ).all()
 
         return jsonify([cat.to_dict() for cat in categories]), 200
 
-    except Exception as e:
-        logger.error(f"Error fetching categories: {str(e)}")
+    except Exception:
+        logger.error("Failed to fetch transaction categories")
         return jsonify({'error': 'Failed to fetch categories'}), 500

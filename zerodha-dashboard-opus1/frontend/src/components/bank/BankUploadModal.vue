@@ -9,7 +9,10 @@
 
         <div class="modal-body">
           <!-- File Upload Section -->
-          <div v-if="!uploadStatus || uploadStatus === 'failed'" class="upload-section">
+          <div
+            v-if="!uploadStatus || (uploadStatus === 'failed' && !statementId)"
+            class="upload-section"
+          >
             <div
               class="drop-zone"
               :class="{ 'drag-over': isDragging, 'has-file': selectedFile }"
@@ -68,7 +71,25 @@
           <div v-if="uploadStatus === 'failed' && uploadError" class="error-section">
             <div class="error-icon">⚠️</div>
             <p class="error-text">{{ uploadError }}</p>
-            <button class="retry-btn" @click="resetUpload">Try Again</button>
+            <div class="recovery-actions">
+              <button
+                v-if="statementId"
+                class="retry-btn"
+                @click="retryParsing"
+              >
+                Retry parsing
+              </button>
+              <button
+                v-if="statementId"
+                class="discard-btn"
+                @click="discardUpload"
+              >
+                Discard upload
+              </button>
+              <button v-else class="retry-btn" @click="startOver">
+                Try another file
+              </button>
+            </div>
           </div>
         </div>
 
@@ -81,7 +102,7 @@
             Cancel
           </button>
           <button
-            v-if="!uploadStatus || uploadStatus === 'failed'"
+            v-if="!uploadStatus || (uploadStatus === 'failed' && !statementId)"
             class="btn-primary"
             @click="handleUpload"
             :disabled="!selectedFile || isProcessing"
@@ -111,6 +132,7 @@ const isOpen = computed(() => uploadModal.value.isOpen)
 const uploadStatus = computed(() => uploadModal.value.status)
 const progress = computed(() => uploadModal.value.progress)
 const uploadError = computed(() => uploadModal.value.error)
+const statementId = computed(() => uploadModal.value.statementId)
 
 const isProcessing = computed(() => {
   return uploadStatus.value === 'uploading' || uploadStatus.value === 'parsing'
@@ -190,9 +212,8 @@ const handleUpload = async () => {
       uploadModal.value.bankAccountId,
       selectedFile.value
     )
-  } catch (error) {
+  } catch {
     // Error is already handled in store
-    console.error('Upload failed:', error)
   }
 }
 
@@ -202,6 +223,28 @@ const resetUpload = () => {
   isDragging.value = false
   if (fileInput.value) {
     fileInput.value.value = ''
+  }
+}
+
+const startOver = () => {
+  bankAccountsStore.resetUploadAttempt()
+  resetUpload()
+}
+
+const retryParsing = async () => {
+  try {
+    await bankAccountsStore.retryStatementParse()
+  } catch {
+    // The store retains the uploaded statement and exposes the retry error.
+  }
+}
+
+const discardUpload = async () => {
+  try {
+    await bankAccountsStore.discardStatement()
+    resetUpload()
+  } catch {
+    uploadModal.value.error = 'Failed to discard statement'
   }
 }
 
@@ -518,6 +561,24 @@ const formatFileSize = (bytes) => {
 .retry-btn:hover {
   background: #2563eb;
   transform: translateY(-1px);
+}
+
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 9px;
+}
+
+.discard-btn {
+  padding: 10px 18px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
 }
 
 .modal-footer {

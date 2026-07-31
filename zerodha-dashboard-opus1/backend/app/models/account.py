@@ -11,7 +11,7 @@ class Account(db.Model):
     __tablename__ = 'accounts'
 
     id = db.Column(db.Integer, primary_key=True)
-    account_name = db.Column(db.String(100), nullable=False, unique=True)
+    account_name = db.Column(db.String(100), nullable=False)
 
     # Encrypted credentials
     api_key_encrypted = db.Column(db.Text, nullable=False)
@@ -19,11 +19,21 @@ class Account(db.Model):
     access_token_encrypted = db.Column(db.Text)
     request_token_encrypted = db.Column(db.Text)
 
-    # Foreign key to user (will be added in migration)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
 
     # Status and metadata
     is_active = db.Column(db.Boolean, default=True)
+    portfolio_version = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default='0',
+    )
     last_synced_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -31,8 +41,13 @@ class Account(db.Model):
     # Relationships
     user = db.relationship('User', back_populates='accounts')
     holdings = db.relationship('Holding', back_populates='account', cascade='all, delete-orphan')
+    snapshots = db.relationship('Snapshot', back_populates='account', cascade='all, delete-orphan')
     timeseries = db.relationship('PortfolioTimeseries', back_populates='account', cascade='all, delete-orphan')
     sector_allocations = db.relationship('SectorAllocation', back_populates='account', cascade='all, delete-orphan')
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'account_name', name='uq_accounts_user_account_name'),
+    )
 
     def __repr__(self):
         return f'<Account {self.account_name}>'

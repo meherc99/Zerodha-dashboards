@@ -1,358 +1,384 @@
-"""
-Holdings endpoints.
-"""
-from flask import Blueprint, request, jsonify
-from werkzeug.utils import secure_filename
-from app.database import db
-from app.models import Account, Holding, Snapshot
-from app.services.portfolio_service import PortfolioService
-from app.services.scheduler_service import SchedulerService
-from app.services.us_holdings_service import USHoldingsService
-from app.services.fd_service import FDService
+"""Authenticated portfolio holdings, synchronization, and import endpoints."""
 import logging
 import os
+import tempfile
+import zipfile
+
+from flask import Blueprint, current_app, jsonify, request
+from flask_jwt_extended import jwt_required
+
+from app.database import db
+from app.models import Account
+from app.services.fd_service import FDService
+from app.services.portfolio_service import PortfolioService
+from app.services.us_holdings_service import USHoldingsService
+from app.utils.auth import current_user_id, owned_account
+from app.utils.rate_limiter import user_rate_limit
+
 
 logger = logging.getLogger(__name__)
-
 holdings_bp = Blueprint('holdings', __name__, url_prefix='/api/holdings')
 
+ALLOWED_SPREADSHEETS = {
+    '.xlsx': b'PK\x03\x04',
+    '.xls': b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1',
+}
+MAX_XLSX_MEMBERS = 2000
+MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+SORT_FIELDS = {
+    'tradingsymbol',
+    'account_name',
+    'quantity',
+    'average_price',
+    'last_price',
+    'current_value',
+    'pnl',
+    'pnl_percentage',
+    'day_change',
+    'day_change_percentage',
+}
+INSTRUMENT_TYPES = {'equity', 'mf', 'us_equity', 'fd'}
 
-@holdings_bp.route('', methods=['GET'])
+
+def _selected_account(user_id, value, *, required=True):
+    if value in (None, ''):
+        if required:
+            return None, (jsonify({'error': 'account_id is required'}), 400)
+        return None, None
+    try:
+        account_id = int(value)
+    except (TypeError, ValueError):
+        return None, (jsonify({'error': 'account_id must be an integer'}), 400)
+    account = owned_account(account_id, user_id=user_id, active_only=True)
+    if not account:
+        return None, (jsonify({'error': 'Account not found'}), 404)
+    return account, None
+
+
+def _refresh_accounts(user_id, value):
+    if value in (None, ''):
+        accounts = (
+            Account.query.filter_by(user_id=user_id, is_active=True)
+            .order_by(Account.id.asc())
+            .all()
+        )
+        if not accounts:
+            return [], (jsonify({'error': 'No active accounts found'}), 400)
+        return accounts, None
+    account, error = _selected_account(user_id, value)
+    return ([account] if account else []), error
+
+
+def _save_spreadsheet(upload):
+    """Validate file signature and save to a random private temporary path."""
+    filename = upload.filename or ''
+    extension = os.path.splitext(filename)[1].lower()
+    expected_magic = ALLOWED_SPREADSHEETS.get(extension)
+    if expected_magic is None:
+        raise ValueError('Upload an .xlsx or .xls spreadsheet')
+
+    header = upload.stream.read(len(expected_magic))
+    upload.stream.seek(0)
+    if header != expected_magic:
+        raise ValueError('Spreadsheet content does not match its extension')
+
+    temporary = tempfile.NamedTemporaryFile(
+        prefix='portfolio-import-',
+        suffix=extension,
+        delete=False,
+    )
+    path = temporary.name
+    temporary.close()
+    try:
+        upload.save(path)
+        if extension == '.xlsx':
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    members = archive.infolist()
+                    expanded_size = sum(member.file_size for member in members)
+                    if (
+                        len(members) > MAX_XLSX_MEMBERS
+                        or expanded_size > MAX_XLSX_UNCOMPRESSED_BYTES
+                    ):
+                        raise ValueError(
+                            'Spreadsheet archive is too large to process safely'
+                        )
+            except zipfile.BadZipFile as error:
+                raise ValueError('Spreadsheet archive is invalid') from error
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            logger.error("Failed to clean up rejected spreadsheet upload")
+        raise
+    return path
+
+
+def _remove_spreadsheet(path):
+    """Best-effort cleanup without turning a committed import into a false 500."""
+    if not path or not os.path.exists(path):
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        logger.error("Failed to clean up temporary spreadsheet upload")
+
+
+@holdings_bp.get('')
+@jwt_required()
 def get_holdings():
-    """Get holdings with optional filtering"""
-    # Query parameters
-    account_id = request.args.get('account_id', type=int)
+    """Return current holdings across the user's latest account snapshots."""
+    user_id = current_user_id()
+    raw_account_id = request.args.get('account_id')
+    try:
+        account_id = int(raw_account_id) if raw_account_id is not None else None
+    except ValueError:
+        return jsonify({'error': 'account_id must be an integer'}), 400
+    if account_id is not None and not owned_account(account_id, user_id=user_id):
+        return jsonify({'error': 'Account not found'}), 404
+
+    holdings = PortfolioService.get_latest_holdings(
+        user_id,
+        [account_id] if account_id is not None else None,
+    )
     instrument_type = request.args.get('instrument_type')
+    if instrument_type and instrument_type not in INSTRUMENT_TYPES:
+        return jsonify({'error': 'Unsupported instrument_type'}), 400
+    if instrument_type:
+        holdings = [
+            holding
+            for holding in holdings
+            if holding.instrument_type == instrument_type
+        ]
+
+    search = request.args.get('search', '').strip().casefold()
+    if search:
+        holdings = [
+            holding
+            for holding in holdings
+            if search in holding.tradingsymbol.casefold()
+            or search in holding.account.account_name.casefold()
+        ]
+
     sort_by = request.args.get('sort_by', 'pnl_percentage')
-    sort_order = request.args.get('sort_order', 'desc')
+    if sort_by not in SORT_FIELDS:
+        return jsonify({'error': 'Unsupported sort field'}), 400
+    sort_order = request.args.get('sort_order', 'desc').lower()
+    if sort_order not in {'asc', 'desc'}:
+        return jsonify({'error': 'sort_order must be asc or desc'}), 400
+    descending = sort_order == 'desc'
 
-    try:
-        # Get latest snapshot
-        latest_snapshot = Snapshot.query.order_by(Snapshot.snapshot_date.desc()).first()
+    def sort_value(holding):
+        if sort_by == 'account_name':
+            return holding.account.account_name.casefold()
+        value = getattr(holding, sort_by)
+        if sort_by == 'tradingsymbol':
+            return value.casefold()
+        return float(value or 0)
 
-        if not latest_snapshot:
-            return jsonify({
-                'holdings': [],
-                'summary': {
-                    'total_holdings': 0,
-                    'total_investment': 0,
-                    'current_value': 0,
-                    'total_pnl': 0,
-                    'total_pnl_percentage': 0,
-                    'day_change': 0
-                }
-            }), 200
-
-        # Build query
-        query = Holding.query.filter_by(snapshot_id=latest_snapshot.id)
-
-        if account_id:
-            query = query.filter_by(account_id=account_id)
-
-        if instrument_type:
-            query = query.filter_by(instrument_type=instrument_type)
-
-        # Apply sorting
-        if sort_by in ['pnl', 'pnl_percentage', 'current_value', 'tradingsymbol']:
-            sort_column = getattr(Holding, sort_by)
-            if sort_order == 'desc':
-                query = query.order_by(sort_column.desc())
-            else:
-                query = query.order_by(sort_column.asc())
-
-        holdings = query.all()
-
-        # Calculate summary
-        summary = PortfolioService.calculate_portfolio_summary(holdings)
-
-        return jsonify({
-            'holdings': [h.to_dict() for h in holdings],
-            'summary': summary
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error fetching holdings: {e}")
-        return jsonify({'error': 'Failed to fetch holdings'}), 500
+    holdings.sort(key=sort_value, reverse=descending)
+    return jsonify(
+        {
+            'holdings': [holding.to_dict() for holding in holdings],
+            'summary': PortfolioService.calculate_portfolio_summary(holdings),
+        }
+    )
 
 
-@holdings_bp.route('/aggregated', methods=['GET'])
+@holdings_bp.get('/aggregated')
+@jwt_required()
 def get_aggregated_holdings():
-    """Get aggregated holdings across all family accounts"""
-    try:
-        aggregated = PortfolioService.aggregate_accounts()
-
-        return jsonify(aggregated), 200
-
-    except Exception as e:
-        logger.error(f"Error fetching aggregated holdings: {e}")
-        return jsonify({'error': 'Failed to fetch aggregated holdings'}), 500
+    return jsonify(PortfolioService.aggregate_accounts(current_user_id()))
 
 
-@holdings_bp.route('/sync', methods=['POST'])
+@holdings_bp.post('/sync')
+@jwt_required()
+@user_rate_limit(max_requests=12, window_minutes=60)
 def trigger_sync():
-    """Trigger manual sync for specific account or all accounts"""
-    data = request.get_json() or {}
+    user_id = current_user_id()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid JSON data'}), 400
+    unexpected = sorted(set(data) - {'account_id'})
+    if unexpected:
+        return jsonify({'error': f'Unsupported field: {unexpected[0]}'}), 400
     account_id = data.get('account_id')
+    if account_id is not None:
+        account, error = _selected_account(user_id, account_id)
+        if error:
+            return error
+        account_id = account.id
 
     try:
-        # Get scheduler instance from app context
-        from flask import current_app
-        scheduler = current_app.scheduler
-
-        scheduler.trigger_manual_sync(account_id=account_id)
-
-        return jsonify({
-            'message': 'Sync initiated successfully',
-            'account_id': account_id
-        }), 202
-
-    except Exception as e:
-        logger.error(f"Error triggering sync: {e}")
-        return jsonify({'error': str(e)}), 500
+        result = current_app.scheduler.trigger_manual_sync(
+            user_id=user_id,
+            account_id=account_id,
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        logger.error('Manual sync failed for user %s', user_id)
+        return jsonify({'error': 'Portfolio sync failed'}), 502
 
 
-@holdings_bp.route('/us/upload', methods=['POST'])
+@holdings_bp.post('/us/upload')
+@jwt_required()
+@user_rate_limit(max_requests=10, window_minutes=60)
 def upload_us_holdings():
-    """
-    Upload US stock holdings from Excel file.
+    user_id = current_user_id()
+    account, error = _selected_account(user_id, request.form.get('account_id'))
+    if error:
+        return error
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'error': 'No file provided'}), 400
 
-    Expects:
-    - file: Excel file (.xlsx)
-    - account_id: Account ID to associate holdings with (optional)
-
-    Returns: Created holdings
-    """
+    path = None
     try:
-        # Check if file exists in request
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-
-        file = request.files['file']
-
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-
-        # Validate file extension
-        if not file.filename.lower().endswith(('.xlsx', '.xls')):
-            return jsonify({'error': 'Invalid file format. Please upload Excel file (.xlsx)'}), 400
-
-        # Get account_id from form data
-        account_id = request.form.get('account_id')
-        if not account_id:
-            # Try to get first active account
-            first_account = Account.query.filter_by(is_active=True).first()
-            if not first_account:
-                return jsonify({'error': 'No active account found. Please create an account first.'}), 400
-            account_id = first_account.id
-            logger.info(f"Using default account: {account_id}")
-
-        # Save file temporarily
-        filename = secure_filename(file.filename)
-        temp_path = os.path.join('/tmp', filename)
-        file.save(temp_path)
-
-        try:
-            # Parse and create holdings
-            service = USHoldingsService()
-            parsed_holdings = service.parse_excel_file(temp_path)
-
-            if not parsed_holdings:
-                return jsonify({'error': 'No valid holdings found in file'}), 400
-
-            # Create holdings with price fetching
-            created_holdings = service.create_holdings(
-                account_id=int(account_id),
-                parsed_holdings=parsed_holdings,
-                fetch_prices=True
-            )
-
-            return jsonify({
-                'message': 'Holdings uploaded successfully',
-                'count': len(created_holdings),
-                'holdings': [
-                    {
-                        'symbol': h.tradingsymbol,
-                        'quantity': h.quantity,
-                        'current_value': float(h.current_value),
-                        'pnl': float(h.pnl)
-                    } for h in created_holdings
-                ]
-            }), 201
-        finally:
-            # Clean up temp file
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-    except Exception as e:
-        logger.error(f"Error uploading US holdings: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@holdings_bp.route('/us/refresh-prices', methods=['POST'])
-def refresh_us_prices():
-    """
-    Refresh prices for US stock holdings.
-
-    Expects:
-    - account_id: Account ID (optional, refreshes all US holdings if not provided)
-
-    Returns: Updated holdings
-    """
-    try:
-        data = request.get_json() or {}
-        account_id = data.get('account_id')
-
-        # Get latest snapshot for US holdings
-        query = Holding.query.filter_by(instrument_type='us_equity')
-        if account_id:
-            query = query.filter_by(account_id=account_id)
-
-        # Get latest snapshot
-        latest_snapshot = Snapshot.query.order_by(Snapshot.snapshot_date.desc()).first()
-        if latest_snapshot:
-            query = query.filter_by(snapshot_id=latest_snapshot.id)
-
-        us_holdings = query.all()
-
-        if not us_holdings:
-            return jsonify({'message': 'No US holdings found'}), 200
-
-        # Fetch fresh prices
+        path = _save_spreadsheet(upload)
         service = USHoldingsService()
-        symbols = list(set([h.tradingsymbol for h in us_holdings]))  # Unique symbols
-        prices = service.fetch_current_prices(symbols)
-
-        # Update holdings
-        updated_count = 0
-        for holding in us_holdings:
-            symbol = holding.tradingsymbol
-            if symbol in prices and 'current_price' in prices[symbol]:
-                price_data = prices[symbol]
-                holding.last_price = price_data['current_price']
-                holding.day_change = price_data.get('change', 0)
-                holding.day_change_percentage = price_data.get('change_percent', 0)
-
-                # Recalculate values
-                holding.current_value = holding.quantity * holding.last_price
-                investment = holding.quantity * holding.average_price
-                holding.pnl = holding.current_value - investment
-                holding.pnl_percentage = (holding.pnl / investment * 100) if investment > 0 else 0
-
-                updated_count += 1
-
-        db.session.commit()
-
-        return jsonify({
-            'message': 'Prices refreshed successfully',
-            'updated_count': updated_count,
-            'total_holdings': len(us_holdings)
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error refreshing US prices: {e}")
+        parsed = service.parse_excel_file(path)
+        created = service.create_holdings(account, parsed, fetch_prices=True)
+        return jsonify(
+            {
+                'message': 'US holdings uploaded successfully',
+                'count': len(created),
+                'holdings': [holding.to_dict() for holding in created],
+            }
+        ), 201
+    except ValueError as exc:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        db.session.rollback()
+        logger.error('US holdings import failed for account %s', account.id)
+        return jsonify({'error': 'Unable to import US holdings'}), 500
+    finally:
+        _remove_spreadsheet(path)
 
 
-@holdings_bp.route('/fd/upload', methods=['POST'])
-def upload_fd_holdings():
-    """
-    Upload Fixed Deposit holdings from Excel file.
-
-    Expects:
-    - file: Excel file (.xlsx)
-    - account_id: Account ID to associate FDs with (optional)
-
-    Returns: Created FD holdings
-    """
-    try:
-        # Check if file exists in request
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-
-        file = request.files['file']
-
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-
-        # Validate file extension
-        if not file.filename.lower().endswith(('.xlsx', '.xls')):
-            return jsonify({'error': 'Invalid file format. Please upload Excel file (.xlsx)'}), 400
-
-        # Get account_id from form data
-        account_id = request.form.get('account_id')
-        if not account_id:
-            # Try to get first active account
-            first_account = Account.query.filter_by(is_active=True).first()
-            if not first_account:
-                return jsonify({'error': 'No active account found. Please create an account first.'}), 400
-            account_id = first_account.id
-            logger.info(f"Using default account: {account_id}")
-
-        # Save file temporarily
-        filename = secure_filename(file.filename)
-        temp_path = os.path.join('/tmp', filename)
-        file.save(temp_path)
-
+@holdings_bp.post('/us/refresh-prices')
+@jwt_required()
+@user_rate_limit(max_requests=20, window_minutes=60)
+def refresh_us_prices():
+    user_id = current_user_id()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid JSON data'}), 400
+    unexpected = sorted(set(data) - {'account_id'})
+    if unexpected:
+        return jsonify({'error': f'Unsupported field: {unexpected[0]}'}), 400
+    accounts, error = _refresh_accounts(user_id, data.get('account_id'))
+    if error:
+        return error
+    service = USHoldingsService()
+    updated = succeeded = failed = skipped = 0
+    for account in accounts:
         try:
-            # Parse and create FD holdings
-            service = FDService()
-            parsed_fds = service.parse_excel_file(temp_path)
-
-            if not parsed_fds:
-                return jsonify({'error': 'No valid FD records found in file'}), 400
-
-            # Create FD holdings with calculated returns
-            created_holdings = service.create_fd_holdings(
-                account_id=int(account_id),
-                parsed_fds=parsed_fds
-            )
-
-            return jsonify({
-                'message': 'Fixed deposits uploaded successfully',
-                'count': len(created_holdings),
-                'holdings': [
-                    {
-                        'bank_name': h.tradingsymbol,
-                        'investment_amount': float(h.average_price),
-                        'current_value': float(h.current_value),
-                        'interest_earned': float(h.pnl),
-                        'interest_rate': h.sector
-                    } for h in created_holdings
-                ]
-            }), 201
-        finally:
-            # Clean up temp file
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-    except Exception as e:
-        logger.error(f"Error uploading FD holdings: {e}")
-        return jsonify({'error': str(e)}), 500
+            account_updates = service.refresh_prices(account)
+            updated += account_updates
+            if account_updates:
+                succeeded += 1
+            else:
+                skipped += 1
+        except Exception:
+            db.session.rollback()
+            failed += 1
+            logger.error('US price refresh failed for account %s', account.id)
+    if failed and not succeeded:
+        status = 'failed'
+    elif failed:
+        status = 'partial'
+    elif succeeded:
+        status = 'completed'
+    else:
+        status = 'no_holdings'
+    return jsonify(
+        {
+            'message': 'US price refresh finished',
+            'updated_count': updated,
+            'accounts_total': len(accounts),
+            'accounts_succeeded': succeeded,
+            'accounts_failed': failed,
+            'accounts_skipped': skipped,
+            'status': status,
+        }
+    ), (502 if status == 'failed' else 200)
 
 
-@holdings_bp.route('/fd/refresh-values', methods=['POST'])
-def refresh_fd_values():
-    """
-    Recalculate interest for Fixed Deposit holdings.
+@holdings_bp.post('/fd/upload')
+@jwt_required()
+@user_rate_limit(max_requests=10, window_minutes=60)
+def upload_fd_holdings():
+    user_id = current_user_id()
+    account, error = _selected_account(user_id, request.form.get('account_id'))
+    if error:
+        return error
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'error': 'No file provided'}), 400
 
-    Expects:
-    - account_id: Account ID (optional, refreshes all FDs if not provided)
-
-    Returns: Updated FD count
-    """
+    path = None
     try:
-        data = request.get_json() or {}
-        account_id = data.get('account_id')
-
+        path = _save_spreadsheet(upload)
         service = FDService()
-        updated_count = service.refresh_fd_values(account_id)
+        parsed = service.parse_excel_file(path)
+        created = service.create_fd_holdings(account, parsed)
+        return jsonify(
+            {
+                'message': 'Fixed deposits uploaded successfully',
+                'count': len(created),
+                'holdings': [holding.to_dict() for holding in created],
+            }
+        ), 201
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        db.session.rollback()
+        logger.error('FD import failed for account %s', account.id)
+        return jsonify({'error': 'Unable to import fixed deposits'}), 500
+    finally:
+        _remove_spreadsheet(path)
 
-        return jsonify({
-            'message': 'FD values refreshed successfully',
-            'updated_count': updated_count
-        }), 200
 
-    except Exception as e:
-        logger.error(f"Error refreshing FD values: {e}")
-        return jsonify({'error': str(e)}), 500
+@holdings_bp.post('/fd/refresh-values')
+@jwt_required()
+@user_rate_limit(max_requests=20, window_minutes=60)
+def refresh_fd_values():
+    user_id = current_user_id()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid JSON data'}), 400
+    unexpected = sorted(set(data) - {'account_id'})
+    if unexpected:
+        return jsonify({'error': f'Unsupported field: {unexpected[0]}'}), 400
+    accounts, error = _refresh_accounts(user_id, data.get('account_id'))
+    if error:
+        return error
+    service = FDService()
+    updated = succeeded = failed = 0
+    for account in accounts:
+        try:
+            updated += service.refresh_fd_values(account)
+            succeeded += 1
+        except Exception:
+            db.session.rollback()
+            failed += 1
+            logger.error('FD refresh failed for account %s', account.id)
+    return jsonify(
+        {
+            'message': 'FD value refresh finished',
+            'updated_count': updated,
+            'accounts_succeeded': succeeded,
+            'accounts_failed': failed,
+            'status': 'completed' if failed == 0 else 'partial',
+        }
+    ), (200 if succeeded else 500)

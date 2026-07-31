@@ -1,18 +1,94 @@
-"""
-Rate limiting utilities using in-memory storage.
-
-For production, consider using Redis-backed rate limiting with Flask-Limiter.
-"""
+"""Fixed-window request limiting with shared production persistence."""
+import hashlib
+import logging
 from functools import wraps
-from flask import request, jsonify
+from flask import current_app, request, jsonify
 from datetime import datetime, timedelta
-from collections import defaultdict
 import threading
+from sqlalchemy.exc import IntegrityError
+
+
+logger = logging.getLogger(__name__)
 
 # In-memory storage for rate limiting
 # Format: {key: {'count': int, 'reset_time': datetime}}
-_rate_limit_storage = defaultdict(dict)
+_rate_limit_storage = {}
 _storage_lock = threading.Lock()
+_MAX_RATE_LIMIT_KEYS = 10_000
+
+
+def _consume_memory_bucket(key, window_minutes):
+    """Increment one bounded process-local development/test bucket."""
+    with _storage_lock:
+        now = datetime.utcnow()
+        if key not in _rate_limit_storage:
+            if len(_rate_limit_storage) >= _MAX_RATE_LIMIT_KEYS:
+                expired_keys = [
+                    existing_key
+                    for existing_key, existing_data
+                    in _rate_limit_storage.items()
+                    if now >= existing_data['reset_time']
+                ]
+                for expired_key in expired_keys:
+                    del _rate_limit_storage[expired_key]
+            if len(_rate_limit_storage) >= _MAX_RATE_LIMIT_KEYS:
+                del _rate_limit_storage[next(iter(_rate_limit_storage))]
+            _rate_limit_storage[key] = {
+                'count': 0,
+                'reset_time': now + timedelta(minutes=window_minutes),
+            }
+
+        data = _rate_limit_storage[key]
+        if now >= data['reset_time']:
+            data['count'] = 0
+            data['reset_time'] = now + timedelta(minutes=window_minutes)
+        data['count'] += 1
+        return data['count'], data['reset_time'], now
+
+
+def _consume_database_bucket(key, window_minutes):
+    """Atomically increment a shared SQL bucket across app workers."""
+    from app.database import db
+    from app.models.rate_limit_bucket import RateLimitBucket
+
+    key_hash = hashlib.sha256(key.encode()).hexdigest()
+    for _attempt in range(5):
+        now = datetime.utcnow()
+        try:
+            updated = (
+                RateLimitBucket.query.filter(
+                    RateLimitBucket.key_hash == key_hash,
+                    RateLimitBucket.reset_time > now,
+                )
+                .update(
+                    {'count': RateLimitBucket.count + 1},
+                    synchronize_session=False,
+                )
+            )
+            if updated:
+                bucket = db.session.get(RateLimitBucket, key_hash)
+                count = bucket.count
+                reset_time = bucket.reset_time
+                db.session.commit()
+                return count, reset_time, now
+
+            RateLimitBucket.query.filter(
+                RateLimitBucket.reset_time <= now
+            ).delete(synchronize_session=False)
+            reset_time = now + timedelta(minutes=window_minutes)
+            db.session.add(
+                RateLimitBucket(
+                    key_hash=key_hash,
+                    count=1,
+                    reset_time=reset_time,
+                )
+            )
+            db.session.commit()
+            return 1, reset_time, now
+        except IntegrityError:
+            # A competing worker created/reset this key; retry its live row.
+            db.session.rollback()
+    raise RuntimeError('Unable to update shared rate-limit counter')
 
 
 def rate_limit(max_requests=10, window_minutes=60, key_func=None):
@@ -35,41 +111,53 @@ def rate_limit(max_requests=10, window_minutes=60, key_func=None):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+            if not current_app.config.get('RATELIMIT_ENABLED', True):
+                return f(*args, **kwargs)
+
             # Generate key for this request
             if key_func:
-                key = key_func()
+                key = str(key_func())
             else:
                 # Default: use IP address
-                key = f"ratelimit:{f.__name__}:{request.remote_addr}"
+                client_address = request.remote_addr or 'unknown'
+                route_name = request.endpoint or f.__name__
+                key = f"ratelimit:{route_name}:{client_address}"
 
-            with _storage_lock:
-                now = datetime.utcnow()
+            try:
+                storage = current_app.config.get(
+                    'RATELIMIT_STORAGE',
+                    'memory',
+                )
+                if storage == 'database':
+                    count, reset_time, now = _consume_database_bucket(
+                        key,
+                        window_minutes,
+                    )
+                elif storage == 'memory':
+                    count, reset_time, now = _consume_memory_bucket(
+                        key,
+                        window_minutes,
+                    )
+                else:
+                    raise RuntimeError('Unsupported rate-limit storage')
+            except Exception:
+                logger.error("Rate-limit storage is unavailable")
+                return jsonify({
+                    'error': 'Request protection is temporarily unavailable'
+                }), 503
 
-                # Get or create rate limit data
-                if key not in _rate_limit_storage:
-                    _rate_limit_storage[key] = {
-                        'count': 0,
-                        'reset_time': now + timedelta(minutes=window_minutes)
-                    }
-
-                data = _rate_limit_storage[key]
-
-                # Check if window has expired
-                if now >= data['reset_time']:
-                    # Reset counter
-                    data['count'] = 0
-                    data['reset_time'] = now + timedelta(minutes=window_minutes)
-
-                # Increment counter
-                data['count'] += 1
-
-                # Check if limit exceeded
-                if data['count'] > max_requests:
-                    retry_after = int((data['reset_time'] - now).total_seconds())
-                    return jsonify({
-                        'error': 'Rate limit exceeded',
-                        'retry_after': retry_after
-                    }), 429
+            if count > max_requests:
+                retry_after = max(
+                    1,
+                    int((reset_time - now).total_seconds()),
+                )
+                response = jsonify({
+                    'error': 'Rate limit exceeded',
+                    'retry_after': retry_after
+                })
+                response.status_code = 429
+                response.headers['Retry-After'] = str(retry_after)
+                return response
 
             # Call the original function
             return f(*args, **kwargs)
@@ -97,14 +185,12 @@ def user_rate_limit(max_requests=10, window_minutes=60):
     """
     def key_func():
         from flask_jwt_extended import get_jwt_identity
-        try:
-            user_id = get_jwt_identity()
-            from flask import current_app
-            route_name = request.endpoint or 'unknown'
+        user_id = get_jwt_identity()
+        route_name = request.endpoint or 'unknown'
+        if user_id is not None:
             return f"ratelimit:user:{user_id}:{route_name}"
-        except:
-            # Fallback to IP if JWT not available
-            return f"ratelimit:ip:{request.remote_addr}:{request.endpoint}"
+        client_address = request.remote_addr or 'unknown'
+        return f"ratelimit:ip:{client_address}:{route_name}"
 
     return rate_limit(max_requests=max_requests, window_minutes=window_minutes, key_func=key_func)
 

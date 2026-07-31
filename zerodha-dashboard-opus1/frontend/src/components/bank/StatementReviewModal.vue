@@ -81,30 +81,29 @@
                     v-for="(txn, index) in transactions"
                     :key="index"
                     class="transaction-row"
-                    :class="{ 'low-confidence': txn.confidence && txn.confidence < 0.7 }"
+                    :class="{ 'low-confidence': txn.category_confidence && txn.category_confidence < 0.7 }"
                   >
-                    <td class="date-cell">{{ formatDate(txn.date) }}</td>
+                    <td class="date-cell">{{ formatDate(txn.transaction_date) }}</td>
                     <td class="description-cell">
                       <div class="description-content">
                         <span>{{ txn.description }}</span>
                         <input
-                          v-if="txn.editable_note !== false"
                           type="text"
-                          v-model="txn.note"
+                          v-model="txn.notes"
                           placeholder="Add note..."
                           class="note-input"
-                          @blur="updateTransaction(index, 'note', txn.note)"
+                          @blur="updateTransaction(index, 'notes', txn.notes)"
                         />
                       </div>
                     </td>
                     <td class="amount-cell debit">
-                      {{ txn.debit ? formatCurrency(txn.debit) : '-' }}
+                      {{ txn.transaction_type === 'debit' ? formatCurrency(txn.amount) : '-' }}
                     </td>
                     <td class="amount-cell credit">
-                      {{ txn.credit ? formatCurrency(txn.credit) : '-' }}
+                      {{ txn.transaction_type === 'credit' ? formatCurrency(txn.amount) : '-' }}
                     </td>
                     <td class="amount-cell balance">
-                      {{ formatCurrency(txn.balance) }}
+                      {{ formatCurrency(txn.running_balance) }}
                     </td>
                     <td class="category-cell">
                       <select
@@ -152,11 +151,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, watch } from 'vue'
 import { useBankAccountsStore } from '@/stores/bankAccounts'
 import { useCategoriesStore } from '@/stores/categories'
 import { useUiStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
+import { formatCurrency as formatMoney } from '@/utils/currency'
 
 const bankAccountsStore = useBankAccountsStore()
 const categoriesStore = useCategoriesStore()
@@ -170,23 +170,27 @@ const loading = computed(() => reviewModal.value.loading)
 const error = computed(() => reviewModal.value.error)
 const transactions = computed(() => reviewModal.value.transactions)
 const warnings = computed(() => reviewModal.value.warnings)
+const currency = computed(() => reviewModal.value.currency || 'INR')
 
 const totalDebits = computed(() => {
-  return transactions.value.reduce((sum, txn) => sum + (txn.debit || 0), 0)
+  return transactions.value.reduce((sum, txn) => {
+    return sum + (txn.transaction_type === 'debit' ? Number(txn.amount || 0) : 0)
+  }, 0)
 })
 
 const totalCredits = computed(() => {
-  return transactions.value.reduce((sum, txn) => sum + (txn.credit || 0), 0)
+  return transactions.value.reduce((sum, txn) => {
+    return sum + (txn.transaction_type === 'credit' ? Number(txn.amount || 0) : 0)
+  }, 0)
 })
 
 const netChange = computed(() => totalCredits.value - totalDebits.value)
 
-// Load categories when modal opens
-onMounted(() => {
-  if (isOpen.value && categories.value.length === 0) {
+watch(isOpen, (open) => {
+  if (open && categories.value.length === 0) {
     categoriesStore.fetchCategories()
   }
-})
+}, { immediate: true })
 
 const loadPreview = async () => {
   if (reviewModal.value.statementId) {
@@ -231,12 +235,10 @@ const handleOverlayClick = () => {
 }
 
 const formatCurrency = (value) => {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
+  return formatMoney(value, currency.value, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value || 0)
+  })
 }
 
 const formatDate = (dateString) => {

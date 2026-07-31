@@ -61,6 +61,21 @@ class TestUploadBankStatement:
         assert 'error' in data
         assert 'PDF' in data['error'] or 'file type' in data['error'].lower()
 
+    def test_upload_rejects_non_pdf_content_with_pdf_extension(
+            self, client, auth_headers, sample_bank_account):
+        """A renamed text file must not pass the PDF upload boundary."""
+        fake_pdf = (io.BytesIO(b'plain text, not a PDF'), 'statement.pdf')
+
+        response = client.post(
+            f'/api/bank-accounts/{sample_bank_account["id"]}/statements/upload',
+            data={'file': fake_pdf},
+            content_type='multipart/form-data',
+            headers=auth_headers
+        )
+
+        assert response.status_code == 400
+        assert 'valid PDF' in response.get_json()['error']
+
     def test_upload_file_too_large(self, client, auth_headers, sample_bank_account):
         """Test upload with file larger than 10MB should fail"""
         # Create a mock large file (11MB of data)
@@ -260,6 +275,7 @@ class TestGetStatementDetails:
         assert data['status'] == 'uploaded'
         assert 'statement_period_start' in data
         assert 'statement_period_end' in data
+        assert 'pdf_file_path' not in data
 
     def test_get_statement_nonexistent(self, client, auth_headers):
         """Test getting non-existent statement"""
@@ -342,7 +358,7 @@ class TestDeleteStatement:
 
         # Verify deletion from database
         with app.app_context():
-            stmt = BankStatement.query.get(stmt_id)
+            stmt = db.session.get(BankStatement, stmt_id)
             assert stmt is None
 
     def test_delete_statement_nonexistent(self, client, auth_headers):
@@ -380,7 +396,7 @@ class TestDeleteStatement:
 
         # Verify statement still exists (wasn't deleted)
         with app.app_context():
-            stmt = BankStatement.query.get(stmt_id)
+            stmt = db.session.get(BankStatement, stmt_id)
             assert stmt is not None
 
     def test_delete_statement_requires_auth(self, client, sample_bank_account, app):
@@ -461,13 +477,16 @@ class TestStatementPreview:
 
         # Each transaction should have category_id and category_confidence
         for txn in data['transactions']:
-            assert 'date' in txn
-            assert 'description' in txn
-            assert 'amount' in txn
-            assert 'transaction_type' in txn
-            assert 'balance' in txn
-            assert 'category_id' in txn
-            assert 'category_confidence' in txn
+            assert set(txn) == {
+                'transaction_date',
+                'description',
+                'amount',
+                'transaction_type',
+                'running_balance',
+                'category_id',
+                'category_confidence',
+                'notes',
+            }
 
         # Check validation warnings
         assert 'validation_warnings' in data
@@ -601,8 +620,21 @@ class TestApproveStatement:
     def test_approve_statement_success(self, client, auth_headers, sample_bank_account, app):
         """Test successful statement approval and transaction creation"""
         from app.models.transaction import Transaction
+        from app.models.transaction_category import TransactionCategory
 
         with app.app_context():
+            groceries = TransactionCategory(
+                name='Groceries',
+                keywords=['bigbasket'],
+            )
+            income = TransactionCategory(
+                name='Income',
+                keywords=['salary'],
+            )
+            db.session.add_all([groceries, income])
+            db.session.flush()
+            groceries_id = groceries.id
+            income_id = income.id
             stmt = BankStatement(
                 bank_account_id=sample_bank_account['id'],
                 statement_period_start=date(2024, 1, 1),
@@ -624,7 +656,7 @@ class TestApproveStatement:
                     'amount': 2500.00,
                     'transaction_type': 'debit',
                     'running_balance': 15000.00,
-                    'category_id': 1,
+                    'category_id': groceries_id,
                     'notes': 'Weekly groceries'
                 },
                 {
@@ -633,7 +665,7 @@ class TestApproveStatement:
                     'amount': 50000.00,
                     'transaction_type': 'credit',
                     'running_balance': 65000.00,
-                    'category_id': 2
+                    'category_id': income_id
                 }
             ]
         }
@@ -665,15 +697,15 @@ class TestApproveStatement:
             assert txn1.amount == Decimal('2500.00')
             assert txn1.transaction_type == 'debit'
             assert txn1.running_balance == Decimal('15000.00')
-            assert txn1.category_id == 1
+            assert txn1.category_id == groceries_id
 
             # Verify statement status updated
-            stmt = BankStatement.query.get(stmt_id)
+            stmt = db.session.get(BankStatement, stmt_id)
             assert stmt.status == 'approved'
 
             # Verify bank account balance updated
             from app.models.bank_account import BankAccount
-            account = BankAccount.query.get(sample_bank_account['id'])
+            account = db.session.get(BankAccount, sample_bank_account['id'])
             assert account.current_balance == Decimal('65000.00')  # Last transaction balance
             assert account.last_statement_date == date(2024, 1, 31)
 

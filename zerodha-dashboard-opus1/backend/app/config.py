@@ -10,6 +10,7 @@ class Config:
 
     # Flask
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    MAX_CONTENT_LENGTH = int(os.environ.get('MAX_UPLOAD_BYTES', 10 * 1024 * 1024))
 
     # Database
     SQLALCHEMY_DATABASE_URI = os.environ.get(
@@ -27,6 +28,9 @@ class Config:
 
     # Scheduler
     SCHEDULER_API_ENABLED = True
+    SCHEDULER_ENABLED = os.environ.get('SCHEDULER_ENABLED', 'true').lower() in {
+        '1', 'true', 'yes'
+    }
     SCHEDULER_TIMEZONE = "Asia/Kolkata"
     SYNC_INTERVAL_HOURS = int(os.environ.get('SYNC_INTERVAL_HOURS', 12))
 
@@ -38,12 +42,16 @@ class Config:
     KITE_RETRY_ATTEMPTS = int(os.environ.get('KITE_RETRY_ATTEMPTS', 3))
 
     # Rate Limiting
-    RATELIMIT_ENABLED = True
+    RATELIMIT_ENABLED = os.environ.get(
+        'RATELIMIT_ENABLED',
+        'true',
+    ).lower() in {'1', 'true', 'yes'}
     RATELIMIT_DEFAULT = "100 per hour"
+    RATELIMIT_STORAGE = os.environ.get('RATELIMIT_STORAGE', 'memory').lower()
 
     # JWT Authentication
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', SECRET_KEY)
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
 
 
 class DevelopmentConfig(Config):
@@ -62,5 +70,4 @@ class ProductionConfig(Config):
 config = {
     'development': DevelopmentConfig,
     'production': ProductionConfig,
-    'default': DevelopmentConfig
 }

@@ -322,17 +322,61 @@ class TestListTransactions:
         assert data['page'] == 2
 
     def test_list_transactions_max_limit(self, client, auth_headers, sample_bank_account, sample_transactions):
-        """Test that limit is capped at 200"""
+        """Oversized pages are rejected instead of silently changing intent."""
         response = client.get(
             f'/api/bank-accounts/{sample_bank_account["id"]}/transactions',
             query_string={'limit': 500},
             headers=auth_headers
         )
 
-        assert response.status_code == 200
-        data = json.loads(response.data)
+        assert response.status_code == 400
+        assert response.get_json()['error'] == 'limit must be between 1 and 200'
 
-        assert data['limit'] == 200  # Should be capped
+    @pytest.mark.parametrize(
+        ('query_string', 'expected_error'),
+        (
+            ({'limit': 0}, 'limit must be between 1 and 200'),
+            ({'limit': 'many'}, 'page and limit must be integers'),
+            ({'page': 0}, 'page must be between 1 and 1000000'),
+            ({'type': 'wire'}, "Type must be 'credit', 'debit', or 'all'"),
+            ({'sort_by': 'private_field'}, 'sort_by must be date, amount, or description'),
+            ({'order': 'sideways'}, 'order must be asc or desc'),
+            ({'date_from': 'not-a-date'}, 'Invalid date_from format. Use YYYY-MM-DD'),
+        ),
+    )
+    def test_list_transactions_rejects_invalid_query_values(
+        self,
+        client,
+        auth_headers,
+        sample_bank_account,
+        query_string,
+        expected_error,
+    ):
+        response = client.get(
+            f'/api/bank-accounts/{sample_bank_account["id"]}/transactions',
+            query_string=query_string,
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['error'] == expected_error
+
+    def test_list_transactions_rejects_unknown_query_fields(
+        self,
+        client,
+        auth_headers,
+        sample_bank_account,
+    ):
+        response = client.get(
+            f'/api/bank-accounts/{sample_bank_account["id"]}/transactions',
+            query_string={'user_id': 999},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['error'] == (
+            'Unsupported query parameter: user_id'
+        )
 
     def test_list_transactions_unauthorized(self, client, auth_headers, other_user_bank_account):
         """Test that users cannot access other users' transactions"""
@@ -430,7 +474,7 @@ class TestUpdateTransaction:
 
         # Verify in database
         with app.app_context():
-            txn = Transaction.query.get(txn_id)
+            txn = db.session.get(Transaction, txn_id)
             assert txn.category_id == 2
             assert txn.updated_at > txn.created_at
 
@@ -452,7 +496,7 @@ class TestUpdateTransaction:
 
         # Verify in database
         with app.app_context():
-            txn = Transaction.query.get(txn_id)
+            txn = db.session.get(Transaction, txn_id)
             assert txn.notes == 'This is a test note'
 
     def test_update_transaction_verified(self, client, auth_headers, sample_transactions, app):
@@ -473,7 +517,7 @@ class TestUpdateTransaction:
 
         # Verify in database
         with app.app_context():
-            txn = Transaction.query.get(txn_id)
+            txn = db.session.get(Transaction, txn_id)
             assert txn.verified is True
 
     def test_update_transaction_multiple_fields(self, client, auth_headers, sample_transactions):
@@ -563,6 +607,50 @@ class TestUpdateTransaction:
 
         assert response.status_code == 400
 
+    @pytest.mark.parametrize(
+        ('body', 'content_type'),
+        (
+            ('[]', 'application/json'),
+            ('null', 'application/json'),
+            ('{broken', 'application/json'),
+            ('notes=hello', 'application/x-www-form-urlencoded'),
+        ),
+    )
+    def test_update_transaction_rejects_malformed_json(
+        self,
+        client,
+        auth_headers,
+        sample_transactions,
+        body,
+        content_type,
+    ):
+        response = client.put(
+            f'/api/transactions/{sample_transactions[0]}',
+            data=body,
+            content_type=content_type,
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['error'] == 'No data provided'
+
+    def test_update_transaction_rejects_unknown_fields(
+        self,
+        client,
+        auth_headers,
+        sample_transactions,
+    ):
+        response = client.put(
+            f'/api/transactions/{sample_transactions[0]}',
+            json={'notes': 'safe', 'bank_account_id': 999},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['error'] == (
+            'Unsupported field: bank_account_id'
+        )
+
 
 class TestDeleteTransaction:
     """Tests for DELETE /api/transactions/:id endpoint"""
@@ -582,7 +670,7 @@ class TestDeleteTransaction:
 
         # Verify transaction is deleted
         with app.app_context():
-            txn = Transaction.query.get(txn_id)
+            txn = db.session.get(Transaction, txn_id)
             assert txn is None
 
     def test_delete_transaction_unauthorized(self, client, auth_headers, other_user_transactions):

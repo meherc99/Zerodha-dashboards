@@ -33,14 +33,13 @@ class TransactionCategory(db.Model):
         return f'<TransactionCategory {self.name}>'
 
     def to_dict(self):
-        """Convert category to dictionary"""
+        """Return category display data without internal matching rules."""
         return {
             'id': self.id,
             'name': self.name,
             'icon': self.icon,
             'color': self.color,
             'parent_category_id': self.parent_category_id,
-            'keywords': self.keywords if self.keywords else [],
             'is_system': self.is_system,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

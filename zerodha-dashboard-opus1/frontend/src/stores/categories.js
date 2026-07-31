@@ -47,7 +47,6 @@ export const useCategoriesStore = defineStore('categories', {
         this.lastFetched = Date.now()
       } catch (error) {
         this.error = error.response?.data?.error || 'Failed to fetch categories'
-        console.error('Error fetching categories:', error)
       } finally {
         this.loading = false
       }

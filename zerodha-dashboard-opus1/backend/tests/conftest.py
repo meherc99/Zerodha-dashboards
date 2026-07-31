@@ -2,18 +2,45 @@
 Shared test fixtures for pytest
 """
 import pytest
+from cryptography.fernet import Fernet
 from app import create_app, db
 from app.models.user import User
+
+
+@pytest.fixture(autouse=True)
+def isolate_statement_uploads(monkeypatch, tmp_path):
+    """Keep statement files out of the source tree during every test."""
+    from app.services import bank_statement_service
+
+    monkeypatch.setattr(
+        bank_statement_service,
+        'UPLOAD_BASE_DIR',
+        str(tmp_path / 'bank-statements'),
+    )
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Keep the process-wide in-memory limiter isolated between tests."""
+    from app.utils.rate_limiter import _rate_limit_storage, _storage_lock
+
+    with _storage_lock:
+        _rate_limit_storage.clear()
+    yield
+    with _storage_lock:
+        _rate_limit_storage.clear()
 
 
 @pytest.fixture
 def app():
     """Create and configure test app"""
-    app = create_app()
-    app.config.update({
+    app = create_app({
         'TESTING': True,
         'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
-        'JWT_SECRET_KEY': 'test-jwt-secret-key',
+        'JWT_SECRET_KEY': 'test-jwt-secret-key-at-least-32-bytes',
+        'SECRET_KEY': 'test-secret-key',
+        'ENCRYPTION_KEY': Fernet.generate_key().decode(),
+        'SCHEDULER_ENABLED': False,
     })
 
     with app.app_context():
@@ -110,6 +137,7 @@ def sample_bank_account(app, sample_user):
             bank_name='HDFC Bank',
             account_number='1234567890',
             account_type='savings',
+            opening_balance=50000.00,
             current_balance=50000.00,
             currency='INR'
         )
@@ -139,6 +167,7 @@ def other_user_bank_account(app, other_user):
             bank_name='ICICI Bank',
             account_number='9876543210',
             account_type='current',
+            opening_balance=100000.00,
             current_balance=100000.00,
             currency='INR'
         )

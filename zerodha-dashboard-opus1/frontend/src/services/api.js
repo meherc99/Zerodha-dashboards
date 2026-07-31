@@ -2,7 +2,7 @@
  * API client for communicating with the backend
  */
 import axios from 'axios'
-import router from '@/router'
+import { clearAuthToken, getAuthToken } from '@/utils/authSession'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
 
@@ -14,9 +14,64 @@ const apiClient = axios.create({
   },
 })
 
+let unauthorizedHandler = null
+let requestGeneration = 0
+const pendingControllers = new Set()
+
+const combineAbortSignals = (signals) => {
+  const activeSignals = signals.filter(Boolean)
+  if (activeSignals.length === 1) {
+    return { signal: activeSignals[0], cleanup: () => {} }
+  }
+
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  activeSignals.forEach(signal => {
+    if (signal.aborted) {
+      controller.abort()
+    } else {
+      signal.addEventListener('abort', abort, { once: true })
+    }
+  })
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      activeSignals.forEach(signal => signal.removeEventListener('abort', abort))
+    }
+  }
+}
+
+const releaseRequest = config => {
+  if (!config) return
+  pendingControllers.delete(config.sessionController)
+  config.signalCleanup?.()
+}
+
+export const setUnauthorizedHandler = handler => {
+  unauthorizedHandler = handler
+}
+
+export const resetApiSession = () => {
+  requestGeneration += 1
+  pendingControllers.forEach(controller => controller.abort())
+  pendingControllers.clear()
+}
+
 // Request interceptor - add token to all requests
 apiClient.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
+  const sessionController = new AbortController()
+  const combinedSignal = combineAbortSignals([
+    config.signal,
+    sessionController.signal
+  ])
+  config.signal = combinedSignal.signal
+  config.sessionGeneration = requestGeneration
+  config.sessionController = sessionController
+  config.signalCleanup = combinedSignal.cleanup
+  pendingControllers.add(sessionController)
+
+  const token = getAuthToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -25,14 +80,28 @@ apiClient.interceptors.request.use(config => {
 
 // Response interceptor - handle 401 errors
 apiClient.interceptors.response.use(
-  response => response,
-  error => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid
-      localStorage.removeItem('token')
-      router.push('/login')
+  response => {
+    releaseRequest(response.config)
+    if (response.config.sessionGeneration !== requestGeneration) {
+      return Promise.reject(new axios.CanceledError('Session changed'))
     }
-    console.error('API Error:', error)
+    return response
+  },
+  error => {
+    releaseRequest(error.config)
+    if (
+      error.config?.sessionGeneration !== undefined
+      && error.config.sessionGeneration !== requestGeneration
+    ) {
+      return Promise.reject(new axios.CanceledError(
+        'Session changed',
+        error.config
+      ))
+    }
+    if (error.response?.status === 401) {
+      clearAuthToken()
+      unauthorizedHandler?.()
+    }
     return Promise.reject(error)
   }
 )
@@ -73,21 +142,21 @@ export const api = {
     return apiClient.post('/auth/login-url', data)
   },
 
-  exchangeAccessToken(data) {
-    return apiClient.post('/auth/access-token', data)
+  getAccountLoginUrl(accountId) {
+    return apiClient.get(`/accounts/${accountId}/login-url`)
   },
 
   // Holdings
-  getHoldings(params = {}) {
-    return apiClient.get('/holdings', { params })
+  getHoldings(params = {}, options = {}) {
+    return apiClient.get('/holdings', { ...options, params })
   },
 
-  getAggregatedHoldings() {
-    return apiClient.get('/holdings/aggregated')
+  getAggregatedHoldings(options = {}) {
+    return apiClient.get('/holdings/aggregated', options)
   },
 
-  syncHoldings(accountId = null) {
-    return apiClient.post('/holdings/sync', { account_id: accountId })
+  syncHoldings(accountId = null, options = {}) {
+    return apiClient.post('/holdings/sync', { account_id: accountId }, options)
   },
 
   // US Holdings
@@ -104,10 +173,10 @@ export const api = {
     })
   },
 
-  refreshUSPrices(accountId = null) {
+  refreshUSPrices(accountId = null, options = {}) {
     return apiClient.post('/holdings/us/refresh-prices', {
       account_id: accountId
-    })
+    }, options)
   },
 
   // Fixed Deposits
@@ -124,23 +193,29 @@ export const api = {
     })
   },
 
-  refreshFDValues(accountId = null) {
+  refreshFDValues(accountId = null, options = {}) {
     return apiClient.post('/holdings/fd/refresh-values', {
       account_id: accountId
-    })
+    }, options)
   },
 
   // Analytics
-  getPortfolioHistory(params = {}) {
-    return apiClient.get('/analytics/portfolio-value-history', { params })
+  getPortfolioHistory(params = {}, options = {}) {
+    return apiClient.get('/analytics/portfolio-value-history', {
+      ...options,
+      params
+    })
   },
 
-  getSectorBreakdown(params = {}) {
-    return apiClient.get('/analytics/sector-breakdown', { params })
+  getSectorBreakdown(params = {}, options = {}) {
+    return apiClient.get('/analytics/sector-breakdown', { ...options, params })
   },
 
-  getPerformanceMetrics(params = {}) {
-    return apiClient.get('/analytics/performance-metrics', { params })
+  getPerformanceMetrics(params = {}, options = {}) {
+    return apiClient.get('/analytics/performance-metrics', {
+      ...options,
+      params
+    })
   },
 
   getCorrelationMatrix(symbols, period = 90) {
@@ -193,6 +268,16 @@ export const api = {
     return apiClient.get(`/statements/${statementId}`)
   },
 
+  getStatements(accountId) {
+    return apiClient.get(`/bank-accounts/${accountId}/statements`)
+  },
+
+  parseStatement(statementId) {
+    return apiClient.post(`/statements/${statementId}/parse`, null, {
+      timeout: 60000
+    })
+  },
+
   getStatementPreview(statementId) {
     return apiClient.get(`/statements/${statementId}/preview`)
   },
@@ -201,39 +286,50 @@ export const api = {
     return apiClient.post(`/statements/${statementId}/approve`, { transactions })
   },
 
+  deleteStatement(statementId) {
+    return apiClient.delete(`/statements/${statementId}`)
+  },
+
   // Categories
   getCategories() {
     return apiClient.get('/categories')
   },
 
   // Bank Analytics
-  getBalanceTrend(accountId, days = 30) {
+  getBalanceTrend(accountId, days = 30, options = {}) {
     return apiClient.get(`/bank-accounts/${accountId}/analytics/balance-trend`, {
+      ...options,
       params: { days }
     })
   },
 
-  getCategoryBreakdown(accountId, periodDays = 30) {
+  getCategoryBreakdown(accountId, periodDays = 30, options = {}) {
     return apiClient.get(`/bank-accounts/${accountId}/analytics/category-breakdown`, {
+      ...options,
       params: { period_days: periodDays }
     })
   },
 
-  getCashflow(accountId, periodDays = 30) {
+  getCashflow(accountId, periodDays = 30, options = {}) {
     return apiClient.get(`/bank-accounts/${accountId}/analytics/cashflow`, {
+      ...options,
       params: { period_days: periodDays }
     })
   },
 
-  getTopMerchants(accountId, limit = 10) {
+  getTopMerchants(accountId, limit = 10, periodDays = 30, options = {}) {
     return apiClient.get(`/bank-accounts/${accountId}/analytics/top-merchants`, {
-      params: { limit }
+      ...options,
+      params: { limit, period_days: periodDays }
     })
   },
 
   // Transactions
-  getTransactions(accountId, params = {}) {
-    return apiClient.get(`/bank-accounts/${accountId}/transactions`, { params })
+  getTransactions(accountId, params = {}, options = {}) {
+    return apiClient.get(`/bank-accounts/${accountId}/transactions`, {
+      ...options,
+      params
+    })
   },
 
   updateTransaction(transactionId, data) {

@@ -1,599 +1,645 @@
 <template>
-  <div class="fixed-deposits-tab">
-    <!-- Upload Section (shown when no FD holdings exist) -->
-    <div v-if="!hasFDHoldings && !holdingsStore.loading" class="upload-section">
-      <div class="upload-card">
-        <h3>🏦 Upload Your Fixed Deposit Details</h3>
-        <p class="upload-description">
-          Upload an Excel file (.xlsx) with your fixed deposit details.
-          Interest will be calculated automatically based on the current date.
+  <div class="page-stack fixed-deposits-page">
+    <div class="page-intro">
+      <div>
+        <p class="eyebrow">Fixed deposits</p>
+        <h2>Predictable returns, fully visible</h2>
+        <p>Track principal and an accrued simple-interest estimate in INR.</p>
+      </div>
+      <div class="page-actions">
+        <button
+          v-if="hasFDHoldings"
+          type="button"
+          class="secondary-button"
+          @click="showImporter = !showImporter"
+        >
+          {{ showImporter ? 'Close import' : 'Replace deposit register' }}
+        </button>
+        <button
+          v-if="hasFDHoldings"
+          type="button"
+          class="primary-button"
+          :disabled="refreshing || !accountsStore.currentAccount"
+          :title="accountsStore.currentAccount ? 'Recalculate the selected member’s deposits' : 'Select Member scope to recalculate deposits'"
+          @click="handleRefreshValues"
+        >
+          <span aria-hidden="true">↻</span>
+          {{ refreshing ? 'Recalculating…' : 'Recalculate interest' }}
+        </button>
+      </div>
+    </div>
+
+    <section
+      v-if="showImporter || !hasFDHoldings"
+      class="import-card"
+      aria-labelledby="fd-import-title"
+    >
+      <div class="import-copy">
+        <span class="import-mark" aria-hidden="true">FD</span>
+        <div>
+          <h2 id="fd-import-title">{{ hasFDHoldings ? 'Replace deposit register' : 'Import fixed deposits' }}</h2>
+          <p>Use a complete Excel workbook with one deposit per row. Importing replaces the current fixed-deposit list for the family account you choose.</p>
+        </div>
+      </div>
+
+      <div class="import-layout">
+        <div>
+          <label v-if="!accountsStore.currentAccount" class="account-field">
+            <span>Destination account</span>
+            <select v-model="uploadAccountId" class="control" required>
+              <option value="" disabled>Select a family member</option>
+              <option
+                v-for="account in accountsStore.activeAccounts"
+                :key="account.id"
+                :value="Number(account.id)"
+              >
+                {{ account.account_name || `Account ${account.id}` }}
+              </option>
+            </select>
+          </label>
+          <div v-else class="scope-confirmation">
+            <span>Destination account</span>
+            <strong>{{ selectedAccountName }}</strong>
+          </div>
+
+          <div
+            class="drop-zone"
+            :class="{ active: dragActive, invalid: uploadError }"
+            @dragenter.prevent="dragActive = true"
+            @dragover.prevent="dragActive = true"
+            @dragleave.prevent="dragActive = false"
+            @drop.prevent="handleDrop"
+          >
+            <input
+              ref="fileInput"
+              class="sr-only"
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              @change="handleFileSelect"
+            />
+            <span class="file-icon" aria-hidden="true">XL</span>
+            <strong>{{ selectedFile ? selectedFile.name : 'Choose or drop an Excel file' }}</strong>
+            <small>{{ selectedFile ? formatFileSize(selectedFile.size) : 'XLSX or XLS · maximum 10 MB' }}</small>
+            <button type="button" class="secondary-button" @click="fileInput?.click()">
+              {{ selectedFile ? 'Choose another file' : 'Choose file' }}
+            </button>
+          </div>
+          <p v-if="uploadError" class="upload-error" role="alert">{{ uploadError }}</p>
+
+          <button
+            type="button"
+            class="primary-button upload-button"
+            :disabled="!canUpload || uploading"
+            @click="handleUpload"
+          >
+            {{ uploading ? 'Replacing securely…' : hasFDHoldings ? 'Replace and calculate' : 'Import and calculate' }}
+          </button>
+        </div>
+
+        <div class="format-guide">
+          <h3>Required columns</h3>
+          <dl>
+            <div><dt>Bank Name</dt><dd>HDFC Bank</dd></div>
+            <div><dt>Investment Amount</dt><dd>250000</dd></div>
+            <div><dt>Investment Date</dt><dd>2025-01-15</dd></div>
+            <div><dt>Interest Rate</dt><dd>7.25</dd></div>
+            <div><dt>Maturity Date</dt><dd>Optional</dd></div>
+          </dl>
+          <p class="security-note">
+            Files are sent only to the authenticated API. The browser validates file type and size before upload.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <template v-if="hasFDHoldings">
+      <PortfolioSummary
+        :summary="fdSummary"
+        currency="INR"
+        value-title="Estimated current value"
+        value-subtitle="Simple-interest estimate"
+        return-title="Estimated accrued interest"
+      />
+
+      <div class="estimate-notice" role="note">
+        <span aria-hidden="true">i</span>
+        <p>
+          <strong>Estimated values.</strong>
+          Accrued interest and current value use simple interest from the imported
+          principal, rate and investment date. Compounding frequency, payout
+          schedules, tax and bank-specific terms are not modelled.
         </p>
-
-        <div class="file-upload-area" @dragover.prevent @drop.prevent="handleDrop">
-          <input
-            ref="fileInput"
-            type="file"
-            accept=".xlsx,.xls"
-            @change="handleFileSelect"
-            style="display: none"
-          />
-
-          <div class="upload-prompt">
-            <span class="upload-icon">📁</span>
-            <p>Drag and drop your Excel file here, or</p>
-            <button @click="$refs.fileInput.click()" class="select-file-btn">
-              Select File
-            </button>
-          </div>
-
-          <div v-if="selectedFile" class="selected-file">
-            <span>📄 {{ selectedFile.name }}</span>
-            <button @click="handleUpload" :disabled="uploading" class="upload-btn">
-              {{ uploading ? 'Uploading...' : 'Upload & Calculate Returns' }}
-            </button>
-          </div>
-        </div>
-
-        <div class="upload-help">
-          <h4>File Format Requirements:</h4>
-          <ul>
-            <li><strong>Bank Name</strong> - Name of the bank (e.g., HDFC, SBI, ICICI)</li>
-            <li><strong>Investment Amount</strong> - Principal amount invested</li>
-            <li><strong>Investment Date</strong> - Date of FD booking (YYYY-MM-DD)</li>
-            <li><strong>Interest Rate</strong> - Annual interest rate (e.g., 7.5 for 7.5%)</li>
-            <li><strong>Maturity Date</strong> - Optional, maturity date of FD</li>
-          </ul>
-          <p class="note">💡 Interest is calculated using simple interest: P × R × T / 100</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Holdings Display (shown when FD holdings exist) -->
-    <div v-else>
-      <!-- Summary Cards with Refresh Button -->
-      <div class="summary-header">
-        <div class="summary-cards">
-          <div class="summary-card">
-            <div class="card-label">Total Investment</div>
-            <div class="card-value">₹{{ formatCurrency(holdingsStore.fdSummary.total_investment) }}</div>
-          </div>
-          <div class="summary-card">
-            <div class="card-label">Current Value</div>
-            <div class="card-value">₹{{ formatCurrency(holdingsStore.fdSummary.current_value) }}</div>
-          </div>
-          <div class="summary-card">
-            <div class="card-label">Total Interest Earned</div>
-            <div class="card-value positive">₹{{ formatCurrency(holdingsStore.fdSummary.total_interest) }}</div>
-          </div>
-          <div class="summary-card">
-            <div class="card-label">Average Return</div>
-            <div class="card-value">{{ holdingsStore.fdSummary.total_interest_percentage.toFixed(2) }}%</div>
-          </div>
-        </div>
-        <button @click="handleRefreshValues" :disabled="refreshing" class="refresh-btn">
-          <span v-if="!refreshing">🔄 Recalculate Interest</span>
-          <span v-else>Calculating...</span>
-        </button>
       </div>
 
-      <!-- FD Holdings Table -->
-      <div class="fd-table-card">
-        <h3>Fixed Deposits</h3>
-        <div class="table-responsive">
-          <table class="fd-table">
-            <thead>
-              <tr>
-                <th>Bank Name</th>
-                <th>Investment Amount</th>
-                <th>Investment Date</th>
-                <th>Interest Rate</th>
-                <th>Days Elapsed</th>
-                <th>Interest Earned</th>
-                <th>Current Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="fd in sortedFDs" :key="fd.id">
-                <td class="bank-name">{{ fd.tradingsymbol }}</td>
-                <td>₹{{ formatCurrency(fd.average_price) }}</td>
-                <td>{{ formatDate(fd.purchase_date) }}</td>
-                <td class="interest-rate">{{ fd.sector }}</td>
-                <td>{{ calculateDaysElapsed(fd.purchase_date) }} days</td>
-                <td class="interest-earned">₹{{ formatCurrency(fd.pnl) }}</td>
-                <td class="current-value">₹{{ formatCurrency(fd.current_value) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      <section class="deposit-insights" aria-label="Fixed deposit highlights">
+        <article>
+          <span>Highest rate</span>
+          <strong>{{ highestRate.toFixed(2) }}% p.a.</strong>
+          <small>Across imported deposits</small>
+        </article>
+        <article>
+          <span>Bank relationships</span>
+          <strong>{{ bankCount }}</strong>
+          <small>{{ fdHoldings.length }} total deposits</small>
+        </article>
+        <article>
+          <span>Average age</span>
+          <strong>{{ averageAgeDays.toLocaleString('en-IN') }} days</strong>
+          <small>Since investment date</small>
+        </article>
+      </section>
+
+      <div class="charts-grid">
+        <ChartPanel
+          title="Bank concentration"
+          subtitle="Estimated current deposit value by bank"
+          :has-data="bankDistributionData.labels.length > 0"
+        >
+          <PieChart :data="bankDistributionData" />
+        </ChartPanel>
+
+        <ChartPanel
+          title="Largest deposits"
+          subtitle="Top deposits by estimated current value"
+          :has-data="topFDsData.labels.length > 0"
+        >
+          <BarChart :data="topFDsData" horizontal />
+        </ChartPanel>
       </div>
 
-      <!-- Charts Row -->
-      <div class="charts-row">
-        <div class="chart-card">
-          <h3>Bank-wise Distribution</h3>
-          <PieChart v-if="bankDistributionData.labels.length" :data="bankDistributionData" />
-          <div v-else class="empty-chart">No distribution data</div>
-        </div>
-
-        <div class="chart-card">
-          <h3>Top Fixed Deposits by Value</h3>
-          <BarChart v-if="topFDsData.labels.length" :data="topFDsData" />
-          <div v-else class="empty-chart">No FD data</div>
-        </div>
-      </div>
-
-      <!-- Re-upload Option -->
-      <div class="reupload-section">
-        <button @click="showUploadAgain" class="secondary-btn">
-          Upload New FD Records
-        </button>
-      </div>
-    </div>
+      <FixedDepositTable :deposits="fdHoldings" />
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useHoldingsStore } from '@/stores/holdings'
 import { useAccountsStore } from '@/stores/accounts'
+import { useUiStore } from '@/stores/ui'
 
+import PortfolioSummary from '@/components/dashboard/PortfolioSummary.vue'
+import FixedDepositTable from '@/components/dashboard/FixedDepositTable.vue'
+import ChartPanel from '@/components/dashboard/ChartPanel.vue'
 import PieChart from '@/components/charts/PieChart.vue'
 import BarChart from '@/components/charts/BarChart.vue'
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024
+const VALID_EXTENSIONS = ['.xlsx', '.xls']
+
 const holdingsStore = useHoldingsStore()
 const accountsStore = useAccountsStore()
+const uiStore = useUiStore()
 
 const fileInput = ref(null)
 const selectedFile = ref(null)
+const uploadAccountId = ref('')
 const uploading = ref(false)
 const refreshing = ref(false)
+const dragActive = ref(false)
+const showImporter = ref(false)
+const uploadError = ref('')
 
-const hasFDHoldings = computed(() => holdingsStore.fdHoldings.length > 0)
+const fdHoldings = computed(() => holdingsStore.fdHoldings)
+const hasFDHoldings = computed(() => fdHoldings.value.length > 0)
+const targetAccountId = computed(() => accountsStore.currentAccount || uploadAccountId.value || null)
+const canUpload = computed(() => Boolean(selectedFile.value && targetAccountId.value && !uploadError.value))
 
-const sortedFDs = computed(() => {
-  return [...holdingsStore.fdHoldings].sort((a, b) => b.current_value - a.current_value)
+const selectedAccountName = computed(() => {
+  const account = accountsStore.accounts.find(item => Number(item.id) === Number(accountsStore.currentAccount))
+  return account?.account_name || `Account ${accountsStore.currentAccount}`
+})
+
+const fdSummary = computed(() => holdingsStore.fdSummary)
+
+const parseRate = holding => {
+  if (holding.interest_rate !== undefined && holding.interest_rate !== null) {
+    return Number(holding.interest_rate) || 0
+  }
+  const match = String(holding.sector || '').match(/[\d.]+/)
+  return match ? Number(match[0]) : 0
+}
+
+const highestRate = computed(() => Math.max(0, ...fdHoldings.value.map(parseRate)))
+const bankCount = computed(() => new Set(fdHoldings.value.map(holding => holding.tradingsymbol)).size)
+
+const daysElapsed = dateString => {
+  if (!dateString) return 0
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return 0
+  return Math.max(0, Math.floor((Date.now() - date.getTime()) / 86400000))
+}
+
+const averageAgeDays = computed(() => {
+  const datedHoldings = fdHoldings.value.filter(holding => holding.purchase_date)
+  if (!datedHoldings.length) return 0
+  const total = datedHoldings.reduce((sum, holding) => sum + daysElapsed(holding.purchase_date), 0)
+  return Math.round(total / datedHoldings.length)
 })
 
 const bankDistributionData = computed(() => {
-  const fds = holdingsStore.fdHoldings
+  const banks = fdHoldings.value.reduce((totals, holding) => {
+    const bank = holding.tradingsymbol || 'Unknown bank'
+    totals[bank] = (totals[bank] || 0) + Number(holding.current_value || 0)
+    return totals
+  }, {})
+  const sorted = Object.entries(banks).sort((left, right) => right[1] - left[1])
   return {
-    labels: fds.map(fd => fd.tradingsymbol),
-    values: fds.map(fd => fd.current_value)
+    labels: sorted.map(([bank]) => bank),
+    values: sorted.map(([, value]) => value)
   }
 })
 
 const topFDsData = computed(() => {
-  const fds = [...holdingsStore.fdHoldings]
-    .sort((a, b) => b.current_value - a.current_value)
-    .slice(0, 10)
+  const deposits = fdHoldings.value
+    .slice()
+    .sort((left, right) => Number(right.current_value || 0) - Number(left.current_value || 0))
+    .slice(0, 8)
   return {
-    labels: fds.map(fd => fd.tradingsymbol),
-    values: fds.map(fd => fd.current_value),
-    label: 'Current Value'
+    labels: deposits.map(deposit => deposit.tradingsymbol),
+    values: deposits.map(deposit => Number(deposit.current_value || 0)),
+    label: 'Current value'
   }
 })
 
-const formatCurrency = (value) => {
-  return new Intl.NumberFormat('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value || 0)
-}
+watch(() => accountsStore.currentAccount, accountId => {
+  uploadAccountId.value = accountId || ''
+})
 
-const formatDate = (dateString) => {
-  if (!dateString) return '-'
-  const date = new Date(dateString)
-  return date.toLocaleDateString('en-IN', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  })
-}
-
-const calculateDaysElapsed = (investmentDate) => {
-  if (!investmentDate) return 0
-  const start = new Date(investmentDate)
-  const today = new Date()
-  const diffTime = Math.abs(today - start)
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-  return diffDays
-}
-
-const handleFileSelect = (event) => {
-  const file = event.target.files[0]
-  if (file) {
-    selectedFile.value = file
+const validateFile = file => {
+  if (!file) return 'Choose an Excel file to continue.'
+  const lowerName = file.name.toLocaleLowerCase()
+  if (!VALID_EXTENSIONS.some(extension => lowerName.endsWith(extension))) {
+    return 'Only .xlsx and .xls files are supported.'
   }
+  if (file.size > MAX_FILE_SIZE) {
+    return 'The selected file is larger than 10 MB.'
+  }
+  return ''
 }
 
-const handleDrop = (event) => {
-  const file = event.dataTransfer.files[0]
-  if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
-    selectedFile.value = file
-  } else {
-    alert('Please drop an Excel file (.xlsx)')
-  }
+const setSelectedFile = file => {
+  uploadError.value = validateFile(file)
+  selectedFile.value = uploadError.value ? null : file
+}
+
+const handleFileSelect = event => {
+  setSelectedFile(event.target.files?.[0])
+}
+
+const handleDrop = event => {
+  dragActive.value = false
+  setSelectedFile(event.dataTransfer.files?.[0])
+}
+
+const resetFile = () => {
+  selectedFile.value = null
+  uploadError.value = ''
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 const handleUpload = async () => {
-  if (!selectedFile.value) return
+  if (!canUpload.value) {
+    uploadError.value = targetAccountId.value
+      ? 'Choose a valid Excel file to continue.'
+      : 'Choose the family account that owns these deposits.'
+    return
+  }
 
   uploading.value = true
+  uploadError.value = ''
   try {
-    const accountId = accountsStore.accounts[0]?.id || 1
-
-    await holdingsStore.uploadFDHoldings(selectedFile.value, accountId)
-
-    alert('Fixed deposits uploaded and interest calculated successfully!')
-
-    selectedFile.value = null
-    if (fileInput.value) {
-      fileInput.value.value = ''
+    await holdingsStore.uploadFDHoldings(selectedFile.value, Number(targetAccountId.value))
+    try {
+      await holdingsStore.loadPortfolio(accountsStore.currentAccount || null)
+    } catch {
+      uiStore.addNotification({
+        type: 'info',
+        message: 'Deposits were imported, but the refreshed family view could not be loaded.'
+      })
     }
-  } catch (error) {
-    alert(error.message || 'Failed to upload FD records')
+    resetFile()
+    showImporter.value = false
+    uiStore.addNotification({ type: 'success', message: 'Fixed-deposit register saved successfully.' })
+  } catch {
+    uploadError.value = holdingsStore.error || 'The deposit file could not be imported.'
   } finally {
     uploading.value = false
   }
 }
 
 const handleRefreshValues = async () => {
+  if (!accountsStore.currentAccount) {
+    uiStore.addNotification({ type: 'info', message: 'Select Member scope before recalculating deposits.' })
+    return
+  }
   refreshing.value = true
   try {
-    const accountId = accountsStore.accounts[0]?.id
-    await holdingsStore.refreshFDValues(accountId)
-
-    console.log('FD interest values recalculated successfully!')
-  } catch (error) {
-    console.error('Failed to refresh FD values', error)
+    await holdingsStore.refreshFDValues(accountsStore.currentAccount)
+    uiStore.addNotification({ type: 'success', message: 'Simple-interest estimates recalculated.' })
+  } catch {
+    uiStore.addNotification({ type: 'error', message: holdingsStore.error || 'Interest recalculation failed.' })
   } finally {
     refreshing.value = false
   }
 }
 
-const showUploadAgain = () => {
-  fileInput.value?.click()
+const formatFileSize = bytes => {
+  if (!bytes) return '0 KB'
+  return bytes >= 1048576
+    ? `${(bytes / 1048576).toFixed(1)} MB`
+    : `${(bytes / 1024).toFixed(1)} KB`
 }
-
-// Auto-refresh values on component mount
-onMounted(async () => {
-  if (hasFDHoldings.value) {
-    await handleRefreshValues()
-  }
-})
 </script>
 
 <style scoped>
-.fixed-deposits-tab {
-  padding: 20px;
+.page-actions {
   display: flex;
-  flex-direction: column;
-  gap: 30px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 9px;
 }
 
-.upload-section {
+.import-card {
+  padding: 22px;
+  border: 1px solid #cbd9f7;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(145deg, #fff, #f5f8ff);
+  box-shadow: var(--shadow-sm);
+}
+
+.import-copy {
   display: flex;
-  justify-content: center;
+  align-items: flex-start;
+  gap: 13px;
+  margin-bottom: 20px;
+}
+
+.import-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.import-copy h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.import-copy p {
+  max-width: 700px;
+  margin: 4px 0 0;
+  color: var(--color-text-soft);
+  font-size: 0.8rem;
+}
+
+.import-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(270px, 0.7fr);
+  gap: 20px;
+}
+
+.account-field,
+.scope-confirmation {
+  display: flex;
   align-items: center;
-  min-height: 400px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.upload-card {
-  background: white;
-  border-radius: 8px;
-  padding: 40px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  max-width: 600px;
+.account-field > span,
+.scope-confirmation > span {
+  color: var(--color-text-soft);
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.account-field select {
+  min-width: 220px;
+}
+
+.scope-confirmation strong {
+  color: var(--color-text);
+  font-size: 0.8rem;
+}
+
+.drop-zone {
+  display: flex;
+  min-height: 188px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 22px;
+  border: 1.5px dashed var(--color-border-strong);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.78);
+  text-align: center;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.drop-zone.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.drop-zone.invalid {
+  border-color: var(--color-negative);
+}
+
+.file-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 10px;
+  background: #e8f1e9;
+  color: #28713a;
+  font-size: 0.65rem;
+  font-weight: 850;
+}
+
+.drop-zone strong {
+  max-width: 90%;
+  margin-top: 9px;
+  overflow: hidden;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drop-zone small {
+  margin: 2px 0 11px;
+  color: var(--color-text-faint);
+  font-size: 0.69rem;
+}
+
+.upload-error {
+  margin: 7px 0 0;
+  color: var(--color-negative);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.upload-button {
   width: 100%;
+  margin-top: 12px;
 }
 
-.upload-card h3 {
-  margin: 0 0 10px 0;
-  font-size: 24px;
-  color: #111827;
+.format-guide {
+  padding: 17px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
 }
 
-.upload-description {
-  color: #6b7280;
-  margin-bottom: 30px;
+.format-guide h3 {
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+}
+
+.format-guide dl {
+  margin: 0;
+}
+
+.format-guide dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 6px 0;
+  border-bottom: 1px solid #edf1f5;
+  font-size: 0.7rem;
+}
+
+.format-guide dt {
+  color: var(--color-text-soft);
+  font-weight: 750;
+}
+
+.format-guide dd {
+  margin: 0;
+  color: var(--color-text-faint);
+}
+
+.security-note {
+  margin: 12px 0 0;
+  padding: 9px;
+  border-radius: 8px;
+  background: var(--color-positive-soft);
+  color: #336b59;
+  font-size: 0.67rem;
+}
+
+.estimate-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px 15px;
+  border: 1px solid #d7ccef;
+  border-radius: 11px;
+  background: #f8f5ff;
+  color: #574778;
+}
+
+.estimate-notice > span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8def9;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.estimate-notice p {
+  margin: 0;
+  font-size: 0.74rem;
   line-height: 1.5;
 }
 
-.file-upload-area {
-  border: 2px dashed #d1d5db;
-  border-radius: 8px;
-  padding: 40px;
-  text-align: center;
-  margin-bottom: 30px;
-  transition: all 0.2s;
+.deposit-insights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.file-upload-area:hover {
-  border-color: #3b82f6;
-  background: #f9fafb;
-}
-
-.upload-prompt {
+.deposit-insights article {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 15px;
+  padding: 15px 17px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
 }
 
-.upload-icon {
-  font-size: 48px;
+.deposit-insights span {
+  color: var(--color-text-faint);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
-.select-file-btn {
-  padding: 10px 24px;
-  background: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
+.deposit-insights strong {
+  margin-top: 4px;
+  font-size: 1.03rem;
 }
 
-.select-file-btn:hover {
-  background: #2563eb;
+.deposit-insights small {
+  margin-top: 2px;
+  color: var(--color-text-faint);
+  font-size: 0.68rem;
 }
 
-.selected-file {
-  margin-top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-  align-items: center;
-}
-
-.upload-btn {
-  padding: 10px 24px;
-  background: #10b981;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.upload-btn:hover:not(:disabled) {
-  background: #059669;
-}
-
-.upload-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.upload-help {
-  background: #f9fafb;
-  padding: 20px;
-  border-radius: 6px;
-}
-
-.upload-help h4 {
-  margin: 0 0 10px 0;
-  font-size: 14px;
-  color: #111827;
-}
-
-.upload-help ul {
-  margin: 0 0 10px 0;
-  padding-left: 20px;
-  color: #6b7280;
-  font-size: 14px;
-  line-height: 1.8;
-}
-
-.upload-help .note {
-  margin: 15px 0 0 0;
-  padding: 10px;
-  background: #eff6ff;
-  border-left: 3px solid #3b82f6;
-  color: #1e40af;
-  font-size: 13px;
-}
-
-.summary-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.summary-cards {
+.charts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.summary-card {
-  background: white;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.card-label {
-  font-size: 13px;
-  color: #6b7280;
-  margin-bottom: 8px;
-  font-weight: 500;
-}
-
-.card-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.card-value.positive {
-  color: #10b981;
-}
-
-.refresh-btn {
-  padding: 10px 20px;
-  background: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-  height: fit-content;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: #2563eb;
-}
-
-.refresh-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.fd-table-card {
-  background: white;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.fd-table-card h3 {
-  margin: 0 0 20px 0;
-  font-size: 18px;
-  color: #111827;
-}
-
-.table-responsive {
-  overflow-x: auto;
-}
-
-.fd-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.fd-table thead {
-  background: #f9fafb;
-}
-
-.fd-table th {
-  padding: 12px;
-  text-align: left;
-  font-size: 13px;
-  font-weight: 600;
-  color: #6b7280;
-  border-bottom: 2px solid #e5e7eb;
-}
-
-.fd-table td {
-  padding: 12px;
-  font-size: 14px;
-  color: #111827;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.fd-table tbody tr:hover {
-  background: #f9fafb;
-}
-
-.bank-name {
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.interest-rate {
-  color: #3b82f6;
-  font-weight: 600;
-}
-
-.interest-earned {
-  color: #10b981;
-  font-weight: 600;
-}
-
-.current-value {
-  font-weight: 700;
-  color: #111827;
-}
-
-.charts-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-  gap: 20px;
-}
-
-.chart-card {
-  background: white;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.chart-card h3 {
-  margin: 0 0 20px 0;
-  font-size: 18px;
-  color: #111827;
-}
-
-.empty-chart {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 300px;
-  color: #9ca3af;
-  font-size: 14px;
-}
-
-.reupload-section {
-  text-align: center;
-  padding: 20px;
-}
-
-.secondary-btn {
-  padding: 10px 20px;
-  background: white;
-  color: #3b82f6;
-  border: 2px solid #3b82f6;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.secondary-btn:hover {
-  background: #eff6ff;
-}
-
-@media (max-width: 768px) {
-  .fixed-deposits-tab {
-    padding: 15px;
-  }
-
-  .upload-card {
-    padding: 20px;
-  }
-
-  .summary-cards {
+@media (max-width: 900px) {
+  .import-layout,
+  .charts-grid {
     grid-template-columns: 1fr;
   }
+}
 
-  .charts-row {
-    grid-template-columns: 1fr;
+@media (max-width: 620px) {
+  .page-actions {
+    width: 100%;
   }
 
-  .table-responsive {
-    overflow-x: scroll;
+  .page-actions button {
+    flex: 1;
+  }
+
+  .import-card {
+    padding: 16px;
+  }
+
+  .account-field,
+  .scope-confirmation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .account-field select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .deposit-insights {
+    grid-template-columns: 1fr;
   }
 }
 </style>

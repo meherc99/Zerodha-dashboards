@@ -31,6 +31,7 @@
         <BalanceTrendChart
           :data="balanceTrend"
           :title="`Balance Trend (Last ${selectedPeriod} Days)`"
+          :currency="currency"
         />
       </div>
 
@@ -39,6 +40,7 @@
         <CategoryBreakdownChart
           :data="categoryBreakdown"
           title="Spending by Category"
+          :currency="currency"
         />
       </div>
 
@@ -47,6 +49,7 @@
         <CashflowChart
           :data="cashflow"
           title="Weekly Income vs Expenses"
+          :currency="currency"
         />
       </div>
 
@@ -55,6 +58,7 @@
         <TopMerchantsChart
           :data="topMerchants"
           title="Top 10 Merchants"
+          :currency="currency"
         />
       </div>
 
@@ -63,21 +67,21 @@
         <h3>Summary</h3>
         <div class="stat-grid">
           <div class="stat">
-            <span class="stat-label">Total Transactions</span>
-            <span class="stat-value">{{ totalTransactions }}</span>
+            <span class="stat-label">Debit transactions</span>
+            <span class="stat-value">{{ debitTransactionCount }}</span>
           </div>
           <div class="stat">
             <span class="stat-label">Total Income</span>
-            <span class="stat-value positive">₹{{ formatCurrency(totalIncome) }}</span>
+            <span class="stat-value positive">{{ formatCurrency(totalIncome) }}</span>
           </div>
           <div class="stat">
             <span class="stat-label">Total Expenses</span>
-            <span class="stat-value negative">₹{{ formatCurrency(totalExpenses) }}</span>
+            <span class="stat-value negative">{{ formatCurrency(totalExpenses) }}</span>
           </div>
           <div class="stat">
             <span class="stat-label">Net Change</span>
             <span :class="['stat-value', netChange >= 0 ? 'positive' : 'negative']">
-              ₹{{ formatCurrency(netChange) }}
+              {{ formatCurrency(netChange) }}
             </span>
           </div>
         </div>
@@ -87,18 +91,23 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useBankAccountsStore } from '@/stores/bankAccounts'
 import BalanceTrendChart from './BalanceTrendChart.vue'
 import CategoryBreakdownChart from './CategoryBreakdownChart.vue'
 import CashflowChart from './CashflowChart.vue'
 import TopMerchantsChart from './TopMerchantsChart.vue'
+import { formatCurrency as formatMoney } from '@/utils/currency'
 
 const props = defineProps({
   accountId: {
     type: Number,
     required: true
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
@@ -120,12 +129,9 @@ const balanceTrend = computed(() => analytics.value.balanceTrend)
 const categoryBreakdown = computed(() => analytics.value.categoryBreakdown)
 const cashflow = computed(() => analytics.value.cashflow)
 const topMerchants = computed(() => analytics.value.topMerchants)
-
-const totalTransactions = computed(() => {
-  const categoryTotal = categoryBreakdown.value.reduce((sum, cat) => sum + (cat.count || 0), 0)
-  const merchantTotal = topMerchants.value.reduce((sum, m) => sum + (m.transaction_count || 0), 0)
-  return Math.max(categoryTotal, merchantTotal)
-})
+const debitTransactionCount = computed(
+  () => analytics.value.debitTransactionCount
+)
 
 const totalIncome = computed(() => {
   return cashflow.value.reduce((sum, week) => sum + Math.abs(week.total_credit || 0), 0)
@@ -138,7 +144,7 @@ const totalExpenses = computed(() => {
 const netChange = computed(() => totalIncome.value - totalExpenses.value)
 
 function formatCurrency(value) {
-  return Math.abs(value).toLocaleString('en-IN', {
+  return formatMoney(value, props.currency, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })
@@ -161,10 +167,6 @@ async function refreshAnalytics() {
 watch(() => props.accountId, () => {
   loadAnalytics()
 }, { immediate: true })
-
-onMounted(() => {
-  loadAnalytics()
-})
 </script>
 
 <style scoped>

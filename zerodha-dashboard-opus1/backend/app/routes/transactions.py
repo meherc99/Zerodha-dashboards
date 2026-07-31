@@ -1,11 +1,34 @@
 """
 Transaction routes for listing, searching, and managing transactions.
 """
+import logging
+
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.services.transaction_service import TransactionService
 
 transactions_bp = Blueprint('transactions', __name__)
+logger = logging.getLogger(__name__)
+TRANSACTION_QUERY_FIELDS = {
+    'date_from',
+    'date_to',
+    'type',
+    'category_id',
+    'search',
+    'sort_by',
+    'order',
+    'page',
+    'limit',
+}
+
+
+def _reject_unknown_query_fields():
+    unexpected = sorted(set(request.args) - TRANSACTION_QUERY_FIELDS)
+    if unexpected:
+        return jsonify({
+            'error': f'Unsupported query parameter: {unexpected[0]}'
+        }), 400
+    return None
 
 
 @transactions_bp.route('/bank-accounts/<int:bank_account_id>/transactions', methods=['GET'])
@@ -32,6 +55,9 @@ def list_transactions(bank_account_id):
         400: Invalid filters
     """
     user_id = int(get_jwt_identity())
+    validation_error = _reject_unknown_query_fields()
+    if validation_error:
+        return validation_error
 
     # Extract filters from query params
     filters = {
@@ -57,8 +83,9 @@ def list_transactions(bank_account_id):
             return jsonify({'error': error_msg}), 404
         else:
             return jsonify({'error': error_msg}), 400
-    except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+    except Exception:
+        logger.exception('Failed to list transactions')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @transactions_bp.route('/transactions/search', methods=['GET'])
@@ -74,6 +101,9 @@ def search_all_transactions():
         400: Invalid filters
     """
     user_id = int(get_jwt_identity())
+    validation_error = _reject_unknown_query_fields()
+    if validation_error:
+        return validation_error
 
     # Extract filters from query params
     filters = {
@@ -93,8 +123,9 @@ def search_all_transactions():
         return jsonify(result), 200
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+    except Exception:
+        logger.exception('Failed to search transactions')
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @transactions_bp.route('/transactions/<int:transaction_id>', methods=['PUT'])
@@ -119,10 +150,31 @@ def update_transaction(transaction_id):
     user_id = int(get_jwt_identity())
 
     # Get JSON data
-    data = request.get_json()
+    data = request.get_json(silent=True)
 
-    if not data:
+    if not isinstance(data, dict) or not data:
         return jsonify({'error': 'No data provided'}), 400
+    unexpected = sorted(set(data) - {'category_id', 'notes', 'verified'})
+    if unexpected:
+        return jsonify({'error': f'Unsupported field: {unexpected[0]}'}), 400
+    category_id = data.get('category_id')
+    if 'category_id' in data and category_id is not None and (
+        isinstance(category_id, bool)
+        or not isinstance(category_id, int)
+        or category_id <= 0
+    ):
+        return jsonify({
+            'error': 'category_id must be a positive integer or null'
+        }), 400
+    notes = data.get('notes')
+    if 'notes' in data and notes is not None and (
+        not isinstance(notes, str) or len(notes) > 1000
+    ):
+        return jsonify({
+            'error': 'notes must contain at most 1000 characters or be null'
+        }), 400
+    if 'verified' in data and not isinstance(data['verified'], bool):
+        return jsonify({'error': 'verified must be a boolean'}), 400
 
     try:
         updated_txn = TransactionService.update_transaction(transaction_id, data, user_id)
@@ -135,8 +187,10 @@ def update_transaction(transaction_id):
             return jsonify({'error': error_msg}), 404
         else:
             return jsonify({'error': error_msg}), 400
-    except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+    except Exception:
+        db.session.rollback()
+        logger.exception('Failed to update transaction %s', transaction_id)
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @transactions_bp.route('/transactions/<int:transaction_id>', methods=['DELETE'])
@@ -163,8 +217,10 @@ def delete_transaction(transaction_id):
             return jsonify({'error': error_msg}), 404
         else:
             return jsonify({'error': error_msg}), 400
-    except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+    except Exception:
+        db.session.rollback()
+        logger.exception('Failed to delete transaction %s', transaction_id)
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @transactions_bp.route('/transactions/bulk-recategorize', methods=['POST'])
@@ -185,19 +241,40 @@ def bulk_recategorize():
         403: Access denied for one or more transactions
     """
     user_id = int(get_jwt_identity())
-    data = request.get_json()
+    data = request.get_json(silent=True)
 
-    if not data:
+    if not isinstance(data, dict) or not data:
         return jsonify({'error': 'No data provided'}), 400
+    unexpected = sorted(set(data) - {'transaction_ids', 'category_id'})
+    if unexpected:
+        return jsonify({'error': f'Unsupported field: {unexpected[0]}'}), 400
 
     transaction_ids = data.get('transaction_ids', [])
     category_id = data.get('category_id')
 
-    if not transaction_ids or not isinstance(transaction_ids, list):
-        return jsonify({'error': 'transaction_ids must be a non-empty array'}), 400
+    if (
+        not isinstance(transaction_ids, list)
+        or not 1 <= len(transaction_ids) <= 500
+        or any(
+            isinstance(transaction_id, bool)
+            or not isinstance(transaction_id, int)
+            or transaction_id <= 0
+            for transaction_id in transaction_ids
+        )
+        or len(set(transaction_ids)) != len(transaction_ids)
+    ):
+        return jsonify({
+            'error': (
+                'transaction_ids must contain 1-500 unique positive integers'
+            )
+        }), 400
 
-    if category_id is None:
-        return jsonify({'error': 'category_id is required'}), 400
+    if (
+        isinstance(category_id, bool)
+        or not isinstance(category_id, int)
+        or category_id <= 0
+    ):
+        return jsonify({'error': 'category_id must be a positive integer'}), 400
 
     try:
         result = TransactionService.bulk_recategorize(transaction_ids, category_id, user_id)
@@ -208,5 +285,6 @@ def bulk_recategorize():
             return jsonify({'error': error_msg}), 403
         else:
             return jsonify({'error': error_msg}), 400
-    except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+    except Exception:
+        logger.exception('Failed to bulk recategorize transactions')
+        return jsonify({'error': 'Internal server error'}), 500

@@ -13,6 +13,7 @@ import {
   Tooltip,
   Legend
 } from 'chart.js'
+import { formatCurrency } from '@/utils/currency'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -25,6 +26,10 @@ const props = defineProps({
   title: {
     type: String,
     default: 'Spending by Category'
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
@@ -77,7 +82,9 @@ const chartOptions = {
           return data.labels.map((label, i) => {
             const value = data.datasets[0].data[i]
             const total = data.datasets[0].data.reduce((a, b) => a + b, 0)
-            const percentage = ((value / total) * 100).toFixed(1)
+            const percentage = total > 0
+              ? ((value / total) * 100).toFixed(1)
+              : '0.0'
             return {
               text: `${label} (${percentage}%)`,
               fillStyle: data.datasets[0].backgroundColor[i],
@@ -108,8 +115,10 @@ const chartOptions = {
           const label = context.label || ''
           const value = context.parsed || 0
           const total = context.dataset.data.reduce((a, b) => a + b, 0)
-          const percentage = ((value / total) * 100).toFixed(1)
-          return `${label}: ₹${value.toLocaleString('en-IN')} (${percentage}%)`
+          const percentage = total > 0
+            ? ((value / total) * 100).toFixed(1)
+            : '0.0'
+          return `${label}: ${formatCurrency(value, props.currency)} (${percentage}%)`
         }
       }
     }

@@ -1,295 +1,354 @@
 <template>
   <div class="dashboard-layout">
-    <div class="dashboard-header">
-      <div>
-        <h1>Portfolio Dashboard</h1>
-        <p v-if="holdingsStore.lastUpdated" class="last-updated">
-          Last updated: {{ formatDate(holdingsStore.lastUpdated) }}
-        </p>
+    <header class="dashboard-header">
+      <div class="header-copy">
+        <p class="eyebrow">{{ scopeEyebrow }}</p>
+        <h1>{{ scopeTitle }}</h1>
+        <div class="freshness-row">
+          <span
+            class="status-chip"
+            :class="freshnessClass"
+          >
+            {{ freshnessLabel }}
+          </span>
+          <span v-if="isDemoMode" class="status-chip demo">Demo data</span>
+          <span v-if="accountSyncLabel" class="sync-detail">{{ accountSyncLabel }}</span>
+        </div>
       </div>
       <div class="header-actions">
         <AccountSelector
           v-model="selectedAccount"
-          :accounts="accountsStore.accounts"
+          :accounts="accountsStore.activeAccounts"
+          :loading="accountsStore.loading || holdingsStore.loading"
         />
-        <button @click="handleSync" :disabled="holdingsStore.loading" class="sync-btn">
-          <span v-if="!holdingsStore.loading">🔄 Sync</span>
-          <span v-else>Syncing...</span>
+        <button
+          type="button"
+          class="primary-button sync-btn"
+          :disabled="holdingsStore.loading || accountsStore.loading"
+          @click="handleSync"
+        >
+          <span class="sync-icon" :class="{ spinning: holdingsStore.loading }" aria-hidden="true">↻</span>
+          <span>{{ holdingsStore.loading ? 'Updating…' : 'Sync portfolio' }}</span>
         </button>
-
-        <!-- User Menu -->
-        <div class="user-menu" @click="toggleUserMenu" ref="userMenuRef">
-          <div class="user-avatar">
-            {{ userInitials }}
-          </div>
-          <div v-if="showUserMenu" class="user-dropdown">
-            <div class="user-info">
-              <p class="user-name">{{ authStore.user?.full_name || 'User' }}</p>
-              <p class="user-email">{{ authStore.user?.email }}</p>
-            </div>
-            <button @click.stop="handleLogout" class="logout-btn">
-              🚪 Logout
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+    </header>
 
     <div class="dashboard-body">
       <Sidebar />
-      <div class="dashboard-main">
-        <LoadingSpinner v-if="holdingsStore.loading && !holdingsStore.summary" message="Loading portfolio data..." />
+      <main class="dashboard-main">
+        <div
+          v-if="combinedError && hasPortfolioData"
+          class="error-banner"
+          role="alert"
+        >
+          <div>
+            <strong>Some portfolio data could not be refreshed.</strong>
+            <span>{{ combinedError }} Showing the last available data.</span>
+          </div>
+          <button type="button" class="secondary-button" @click="loadData">Try again</button>
+        </div>
+
+        <LoadingSpinner
+          v-if="initialLoading"
+          class="initial-loader"
+          message="Loading your portfolio…"
+        />
+
+        <div v-else-if="combinedError && !hasPortfolioData" class="state-wrap">
+          <section class="state-panel" role="alert">
+            <span class="state-symbol error" aria-hidden="true">!</span>
+            <h2>We couldn’t load this portfolio</h2>
+            <p>{{ combinedError }}</p>
+            <div class="state-actions">
+              <button type="button" class="primary-button" @click="loadData">Try again</button>
+              <router-link to="/accounts" class="secondary-button">Check accounts</router-link>
+            </div>
+          </section>
+        </div>
+
         <router-view v-else />
-      </div>
+      </main>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useHoldingsStore } from '@/stores/holdings'
 import { useAccountsStore } from '@/stores/accounts'
 import { useUiStore } from '@/stores/ui'
-import { useAuthStore } from '@/stores/auth'
-import { format } from 'date-fns'
+import { format, formatDistanceToNowStrict } from 'date-fns'
 
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import AccountSelector from '@/components/dashboard/AccountSelector.vue'
 import Sidebar from '@/components/dashboard/Sidebar.vue'
 
-const router = useRouter()
 const holdingsStore = useHoldingsStore()
 const accountsStore = useAccountsStore()
 const uiStore = useUiStore()
-const authStore = useAuthStore()
 
-const selectedAccount = ref(null)
-const showUserMenu = ref(false)
-const userMenuRef = ref(null)
+const selectedAccount = computed({
+  get: () => accountsStore.currentAccount,
+  set: accountId => accountsStore.setCurrentAccount(accountId || null)
+})
+const hasLoaded = ref(false)
+const scopeInitialized = ref(false)
+const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true'
 
-const userInitials = computed(() => {
-  const name = authStore.user?.full_name || authStore.user?.email || 'U'
-  return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+const selectedAccountRecord = computed(() => {
+  return accountsStore.accounts.find(account => Number(account.id) === Number(selectedAccount.value))
 })
 
-const formatDate = (date) => {
-  return format(new Date(date), 'PPpp')
-}
+const scopeEyebrow = computed(() => selectedAccount.value ? 'Individual portfolio' : 'Consolidated household')
+const scopeTitle = computed(() => selectedAccountRecord.value?.account_name || 'Family portfolio')
+const hasPortfolioData = computed(() => holdingsStore.holdings.length > 0 || Boolean(holdingsStore.summary))
+const initialLoading = computed(() => !hasLoaded.value && (holdingsStore.loading || accountsStore.loading))
+const combinedError = computed(() => (
+  holdingsStore.error
+  || accountsStore.error
+  || holdingsStore.analyticsError
+))
 
-function toggleUserMenu() {
-  showUserMenu.value = !showUserMenu.value
-}
+const freshnessAgeMinutes = computed(() => {
+  if (!holdingsStore.lastUpdated) return null
+  return (Date.now() - new Date(holdingsStore.lastUpdated).getTime()) / 60000
+})
 
-function handleClickOutside(event) {
-  if (userMenuRef.value && !userMenuRef.value.contains(event.target)) {
-    showUserMenu.value = false
+const freshnessLabel = computed(() => {
+  if (!holdingsStore.lastUpdated) return 'Not loaded yet'
+  return `Loaded ${formatDistanceToNowStrict(new Date(holdingsStore.lastUpdated), { addSuffix: true })}`
+})
+
+const freshnessClass = computed(() => {
+  if (!holdingsStore.lastUpdated) return ''
+  return freshnessAgeMinutes.value > 30 ? 'stale' : 'live'
+})
+
+const accountSyncLabel = computed(() => {
+  const syncDate = selectedAccountRecord.value?.last_synced_at
+  if (!syncDate) return ''
+  try {
+    return `Broker sync ${format(new Date(syncDate), 'd MMM, h:mm a')}`
+  } catch {
+    return ''
   }
-}
-
-async function handleLogout() {
-  showUserMenu.value = false
-  await authStore.logout()
-  router.push('/login')
-}
+})
 
 const handleSync = async () => {
+  const accountId = selectedAccount.value || null
   try {
-    await holdingsStore.syncHoldings(selectedAccount.value)
+    const result = await holdingsStore.syncHoldings(accountId)
+    if (!result || (selectedAccount.value || null) !== accountId) return
+
+    const analyticsResults = await Promise.allSettled([
+      holdingsStore.fetchSectorBreakdown(accountId),
+      holdingsStore.fetchPortfolioHistory(accountId, 30)
+    ])
+    holdingsStore.analyticsError = analyticsResults.some(
+      analyticsResult => analyticsResult.status === 'rejected'
+    )
+      ? 'Portfolio analytics are temporarily unavailable.'
+      : null
     uiStore.addNotification({
       type: 'success',
-      message: 'Holdings synced successfully!'
+      message: 'Portfolio synced successfully.'
     })
   } catch (error) {
     uiStore.addNotification({
       type: 'error',
-      message: 'Failed to sync holdings'
+      message: holdingsStore.error || 'Failed to sync portfolio.'
     })
   }
 }
 
 const loadData = async () => {
-  if (selectedAccount.value) {
-    await holdingsStore.fetchHoldings(selectedAccount.value)
-    await holdingsStore.fetchSectorBreakdown(selectedAccount.value)
-    await holdingsStore.fetchPortfolioHistory(selectedAccount.value, 30)
-  } else {
-    await holdingsStore.fetchAggregatedHoldings()
-    await holdingsStore.fetchSectorBreakdown()
-    await holdingsStore.fetchPortfolioHistory(null, 30)
+  const accountId = selectedAccount.value || null
+
+  try {
+    const result = await holdingsStore.loadPortfolio(accountId, 30)
+    if (!result.stale) {
+      hasLoaded.value = true
+    }
+  } catch {
+    // The store exposes a sanitized user-facing error and the template owns recovery.
+    hasLoaded.value = true
   }
 }
 
-// Watch for account changes
-watch(selectedAccount, () => {
+watch(selectedAccount, (accountId) => {
+  if (!scopeInitialized.value) return
+  hasLoaded.value = false
   loadData()
 })
 
 onMounted(async () => {
   await accountsStore.fetchAccounts()
+  if (
+    selectedAccount.value
+    && !accountsStore.activeAccounts.some(
+      account => Number(account.id) === Number(selectedAccount.value)
+    )
+  ) {
+    selectedAccount.value = null
+  }
+  scopeInitialized.value = true
   await loadData()
-  document.addEventListener('click', handleClickOutside)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
 <style scoped>
 .dashboard-layout {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+  min-height: calc(100vh - 68px);
 }
 
 .dashboard-header {
   display: flex;
+  min-height: 118px;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
-  padding: 20px;
-  background: white;
-  border-bottom: 1px solid #e5e7eb;
-  flex-wrap: wrap;
-  gap: 20px;
+  gap: 24px;
+  padding: 20px 28px;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .dashboard-header h1 {
   margin: 0;
-  font-size: 32px;
-  color: #111827;
+  color: var(--color-text);
+  font-size: clamp(1.45rem, 2.8vw, 2rem);
+  letter-spacing: -0.035em;
 }
 
-.last-updated {
-  margin-top: 8px;
-  font-size: 14px;
-  color: #6b7280;
+.freshness-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sync-detail {
+  color: var(--color-text-faint);
+  font-size: 0.72rem;
 }
 
 .header-actions {
   display: flex;
-  gap: 15px;
   align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
 }
 
 .sync-btn {
-  padding: 10px 20px;
-  background: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
+  min-height: 42px;
+  white-space: nowrap;
 }
 
-.user-menu {
-  position: relative;
-  cursor: pointer;
+.sync-icon {
+  font-size: 1.08rem;
+  line-height: 1;
 }
 
-.user-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  font-size: 14px;
-  transition: transform 0.2s;
-}
-
-.user-avatar:hover {
-  transform: scale(1.05);
-}
-
-.user-dropdown {
-  position: absolute;
-  top: 50px;
-  right: 0;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-  min-width: 220px;
-  z-index: 1000;
-  overflow: hidden;
-}
-
-.user-info {
-  padding: 16px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.user-name {
-  margin: 0 0 4px 0;
-  font-weight: 600;
-  font-size: 14px;
-  color: #111827;
-}
-
-.user-email {
-  margin: 0;
-  font-size: 12px;
-  color: #6b7280;
-  word-break: break-all;
-}
-
-.logout-btn {
-  width: 100%;
-  padding: 12px 16px;
-  background: transparent;
-  border: none;
-  text-align: left;
-  font-size: 14px;
-  font-weight: 500;
-  color: #374151;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.logout-btn:hover {
-  background: #f9fafb;
-  color: #dc2626;
-}
-
-.sync-btn:hover:not(:disabled) {
-  background: #2563eb;
-}
-
-.sync-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.sync-icon.spinning {
+  animation: spin 850ms linear infinite;
 }
 
 .dashboard-body {
   display: flex;
-  flex: 1;
-  overflow: hidden;
+  align-items: flex-start;
 }
 
 .dashboard-main {
+  min-width: 0;
   flex: 1;
-  overflow-y: auto;
-  background: #f3f4f6;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 18px 28px 0;
+  padding: 13px 15px;
+  border: 1px solid #efc5c9;
+  border-radius: 12px;
+  background: var(--color-negative-soft);
+  color: var(--color-negative);
+}
+
+.error-banner div {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.82rem;
+}
+
+.error-banner span {
+  margin-top: 2px;
+  color: #8e4b51;
+}
+
+.error-banner .secondary-button {
+  min-height: 36px;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.initial-loader {
+  min-height: 55vh;
+}
+
+.state-wrap {
+  padding: 28px;
+}
+
+.state-symbol {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-negative-soft);
+  color: var(--color-negative);
+  font-size: 1.2rem;
+  font-weight: 850;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 768px) {
+  .dashboard-layout {
+    min-height: calc(100vh - 62px);
+  }
+
   .dashboard-header {
     flex-direction: column;
-    padding: 15px;
+    align-items: stretch;
+    padding: 17px 14px;
   }
 
   .header-actions {
     width: 100%;
+    align-items: stretch;
     flex-direction: column;
   }
 
   .dashboard-body {
     flex-direction: column;
+  }
+
+  .sync-btn {
+    width: 100%;
+  }
+
+  .error-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    margin: 14px 14px 0;
+  }
+
+  .state-wrap {
+    padding: 18px 14px;
   }
 }
 </style>

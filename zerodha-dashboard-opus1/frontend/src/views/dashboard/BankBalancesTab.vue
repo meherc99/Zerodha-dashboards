@@ -12,8 +12,18 @@
     <!-- Total Balance Section -->
     <div class="total-balance-card">
       <div class="total-info">
-        <h2>Total Bank Balance</h2>
-        <p class="total-amount">{{ formatCurrency(bankAccountsStore.totalBalance) }}</p>
+        <h2>Bank balances</h2>
+        <p
+          v-for="total in balanceTotals"
+          :key="total.currency"
+          class="total-amount"
+        >
+          {{ formatCurrency(total.value, total.currency) }}
+          <small>{{ total.currency }}</small>
+        </p>
+        <p v-if="balanceTotals.length === 0" class="total-amount">
+          {{ formatCurrency(0, 'INR') }}
+        </p>
         <p class="account-count">Across {{ activeBankCount }} active accounts</p>
       </div>
       <button class="add-bank-btn" @click="showAddBankModal">
@@ -64,9 +74,18 @@
           <button class="back-btn" @click="handleBankSelect(null)">
             ← Back to All Accounts
           </button>
-          <div class="bank-info">
-            <h2>{{ selectedBank.bank_name }}</h2>
-            <p>{{ selectedBank.account_number }}</p>
+          <div class="bank-heading-row">
+            <div class="bank-info">
+              <h2>{{ selectedBank.bank_name }}</h2>
+              <p>{{ selectedBank.account_number }}</p>
+            </div>
+            <button
+              type="button"
+              class="delete-bank-btn"
+              @click="handleBankDelete"
+            >
+              Delete bank account
+            </button>
           </div>
         </div>
 
@@ -98,7 +117,9 @@
           <div v-if="activeTab === 'overview'" class="overview-content">
             <div class="balance-card">
               <h3>Current Balance</h3>
-              <p class="balance-amount">{{ formatCurrency(selectedBank.current_balance) }}</p>
+              <p class="balance-amount">
+                {{ formatCurrency(selectedBank.current_balance, selectedBank.currency) }}
+              </p>
               <p class="last-updated">
                 Last updated: {{ formatDate(selectedBank.last_statement_date) }}
               </p>
@@ -110,14 +131,22 @@
 
           <!-- Transactions Tab -->
           <div v-if="activeTab === 'transactions'" class="transactions-content">
-            <TransactionsList :account-id="selectedBank.id" />
+            <TransactionsList
+              :account-id="selectedBank.id"
+              :currency="selectedBank.currency"
+            />
           </div>
 
           <!-- Analytics Tab -->
           <div v-if="activeTab === 'analytics'" class="analytics-content">
-            <BankAnalyticsView :account-id="selectedBank.id" />
+            <BankAnalyticsView
+              :account-id="selectedBank.id"
+              :currency="selectedBank.currency"
+            />
           </div>
         </div>
+
+        <StatementHistory :account="selectedBank" />
       </div>
     </div>
   </div>
@@ -135,6 +164,7 @@ import StatementReviewModal from '@/components/bank/StatementReviewModal.vue'
 import BankAnalyticsView from '@/components/bank/BankAnalyticsView.vue'
 import TransactionsList from '@/components/bank/TransactionsList.vue'
 import AddBankAccountModal from '@/components/bank/AddBankAccountModal.vue'
+import StatementHistory from '@/components/bank/StatementHistory.vue'
 
 const bankAccountsStore = useBankAccountsStore()
 const uiStore = useUiStore()
@@ -147,10 +177,16 @@ const activeBankCount = computed(() => {
   return bankAccountsStore.activeBankAccounts.length
 })
 
-const formatCurrency = (value) => {
+const balanceTotals = computed(() => {
+  return Object.entries(bankAccountsStore.balancesByCurrency)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, value]) => ({ currency, value }))
+})
+
+const formatCurrency = (value, currency = 'INR') => {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
-    currency: 'INR',
+    currency: currency || 'INR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value || 0)
@@ -168,9 +204,7 @@ const formatDate = (dateString) => {
 const loadBankAccounts = async () => {
   try {
     await bankAccountsStore.fetchBankAccounts()
-  } catch (error) {
-    console.error('Failed to load bank accounts:', error)
-  }
+  } catch {}
 }
 
 const handleBankSelect = (bank) => {
@@ -182,6 +216,30 @@ const handleBankSelect = (bank) => {
 
 const handleStatementUpload = (bank) => {
   bankAccountsStore.openUploadModal(bank.id)
+}
+
+const handleBankDelete = async () => {
+  const bank = selectedBank.value
+  if (!bank) return
+  const confirmed = confirm(
+    'Permanently delete this bank account? Its transactions, uploaded '
+    + 'statements, and PDF files will also be removed. This cannot be undone.'
+  )
+  if (!confirmed) return
+
+  try {
+    await bankAccountsStore.deleteBankAccount(bank.id)
+    activeTab.value = 'overview'
+    uiStore.addNotification({
+      type: 'success',
+      message: 'Bank account and its stored statements were deleted.'
+    })
+  } catch {
+    uiStore.addNotification({
+      type: 'error',
+      message: bankAccountsStore.error || 'Bank account deletion failed.'
+    })
+  }
 }
 
 const showAddBankModal = () => {
@@ -388,6 +446,24 @@ onMounted(() => {
   margin: 0;
   font-size: 14px;
   color: #6b7280;
+}
+
+.bank-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.delete-bank-btn {
+  padding: 8px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
 }
 
 .tab-navigation {

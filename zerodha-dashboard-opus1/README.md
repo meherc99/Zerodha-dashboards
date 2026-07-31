@@ -1,260 +1,202 @@
-# Zerodha Portfolio Dashboard
+# Zerodha Family Portfolio Dashboard
 
-A comprehensive web-based dashboard for analyzing and managing stock and mutual fund holdings across multiple Zerodha accounts.
+A self-hosted Flask and Vue application for reviewing a family’s Indian equities, mutual funds, fixed deposits, US equities, and bank activity without mixing account ownership or currencies.
 
-## Features
+## Highlights
 
-✨ **Multi-Account Support** - Track multiple family member accounts in one place
-📊 **Beautiful Visualizations** - Pie charts, bar charts, time-series graphs, and heatmaps
-🔄 **Automated Sync** - Background updates every 12 hours
-📈 **Advanced Analytics** - P&L tracking, sector allocation, correlation analysis, risk metrics
-🔒 **Secure** - Encrypted credential storage using Fernet encryption
-📱 **Responsive** - Works on desktop and mobile devices
+- JWT registration and login protect the application and API; logout revokes
+  the presented token server-side.
+- Every Zerodha account, bank account, snapshot, holding, import, and analytic query is scoped to its owning user.
+- The Family/Member switch shows either the authenticated user’s combined family view or one selected account.
+- Broker sync reads Kite equity holdings and Coin mutual-fund holdings independently. Mutual-fund units remain fractional and separate folios remain separate positions.
+- Each account has its own immutable portfolio snapshots. Family views combine the latest completed snapshot from each selected account, so one failed sync does not replace another account’s good data.
+- Dedicated Overview, Indian Stocks, Mutual Funds, US Stocks, Fixed Deposits, and Bank Balances pages provide responsive cards, charts, tables, mobile layouts, search, filtering, and sorting.
+- INR domestic assets and USD holdings are summarized separately. The application does not silently add or convert them.
+- Kite credentials, brokerage access tokens, and bank account numbers are
+  encrypted at rest. Brokerage access tokens and full bank account numbers are
+  never returned to the frontend.
 
-## Architecture
+## Technology
 
-**Backend:** Flask + SQLAlchemy + APScheduler
-**Frontend:** Vue 3 + Pinia + Chart.js
-**Database:** PostgreSQL/SQLite
-**API:** Zerodha Kite Connect
+- Backend: Flask, Flask-SQLAlchemy, Flask-JWT-Extended, APScheduler, Alembic, Kite Connect, pandas
+- Frontend: Vue 3, Pinia, Vue Router, Chart.js, Axios, Vite
+- Database: SQLite for local development; PostgreSQL is supported through `DATABASE_URL`
+- Tests: pytest for the backend; Vitest for frontend logic and state
 
-## Project Structure
+## Repository Layout
 
-```
-zerodha-dashboard/
-├── backend/              # Flask API server
+```text
+.
+├── backend/
+│   ├── alembic/             # Versioned database migrations
 │   ├── app/
-│   │   ├── models/      # Database models
-│   │   ├── services/    # Business logic
-│   │   ├── routes/      # API endpoints
-│   │   └── utils/       # Utilities
+│   │   ├── models/          # SQLAlchemy models
+│   │   ├── routes/          # Authenticated API routes
+│   │   ├── services/        # Sync, valuation, analytics, and imports
+│   │   └── utils/           # Auth, encryption, validation, and rate limiting
+│   ├── tests/
+│   ├── .env.example
 │   ├── requirements.txt
 │   └── run.py
-├── frontend/            # Vue.js application
+├── frontend/
 │   ├── src/
-│   │   ├── components/  # Vue components
-│   │   ├── views/       # Page views
-│   │   ├── stores/      # Pinia stores
-│   │   └── services/    # API client
+│   ├── tests/
 │   └── package.json
+├── GETTING_STARTED.md
 └── README.md
 ```
 
 ## Quick Start
 
-### Prerequisites
+Prerequisites:
 
-- Python 3.9+
-- Node.js 18+
-- Zerodha Kite Connect API subscription ([Get it here](https://kite.trade/))
+- Python 3.10 or newer (3.11+ recommended)
+- Node.js 20.19+ or 22.12+ (Node.js 24 LTS is also supported)
+- A Kite Connect application for live Zerodha sync
+- A Finnhub API key only if US quote refreshes are required
 
-### 1. Backend Setup
+Start the backend:
 
 ```bash
 cd backend
-
-# Create virtual environment
 python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+```
 
-# Install dependencies
-pip install -r requirements.txt
+Generate independent application and JWT secrets:
 
-# Configuration is already done in .env file
-# Start the server
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Put those values in `backend/.env`, then migrate and run:
+
+```bash
+python -m alembic upgrade head
 python run.py
 ```
 
-The API will run on http://localhost:5000
+The API listens on `http://localhost:5000` by default. The scheduler starts only from `run.py`; importing the application factory for tests or migrations does not start background threads.
 
-### 2. Frontend Setup
+Start the frontend in another terminal:
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Start development server
 npm run dev
 ```
 
-The frontend will run on http://localhost:5173
+Open `http://localhost:5173`, register a dashboard user, and add an account. See [GETTING_STARTED.md](GETTING_STARTED.md) for the complete setup and Kite login flow.
 
-### 3. Add Your Zerodha Account
+## Authentication and Kite Session Flow
 
-Option 1: Using API:
+The dashboard has two distinct authentication layers:
+
+1. `POST /api/auth/register` or `POST /api/auth/login` returns the dashboard JWT used as `Authorization: Bearer <token>`.
+2. On the Accounts page, enter the account name, Kite API key, and Kite API secret.
+3. Open the trusted Kite login URL, complete the Zerodha login, and copy the one-time `request_token` from the redirect URL.
+4. Submit that request token with the account form. The backend exchanges it
+   once, discards it, and encrypts the API credentials and resulting access
+   token before persistence.
+
+The response never contains the Kite access token. `POST /api/auth/access-token` is intentionally retired and returns `410 Gone`; clients must submit `request_token` to `POST /api/accounts` or `PUT /api/accounts/:id`.
+
+Kite sessions expire according to Zerodha’s rules. When a session expires, use
+**Reconnect** on the existing account. The backend builds its login URL from
+the encrypted server-side API key, then exchanges the new one-time request
+token without creating a duplicate account.
+
+## Portfolio and Import Semantics
+
+### Zerodha sync
+
+A manual or scheduled sync creates a completed snapshot per account and fetches equities and mutual funds through their respective Kite APIs. The latest completed snapshot is used for reads; failed attempts do not become the current portfolio.
+
+### US holdings
+
+The US page accepts `.xlsx` or `.xls` with these columns:
+
+- `Symbol`
+- `Quantity`
+- `Average Price`
+- `Purchase Date` (optional)
+
+An upload is a complete replacement of the selected account’s current US positions, not an append. The complete workbook is validated before a snapshot is created; one malformed or duplicate row rejects the entire upload and leaves the prior positions intact. Other asset classes are carried into the new account snapshot. Values remain in USD. If a live quote is unavailable during import, the position is visibly retained at import cost rather than presented as a current quote. A later price refresh is published only when every symbol for that account receives a valid quote.
+
+### Fixed deposits
+
+The Fixed Deposits page accepts `.xlsx` or `.xls` with:
+
+- `Bank Name`
+- `Investment Amount`
+- `Investment Date`
+- `Interest Rate`
+- `Maturity Date` (optional)
+- `Deposit ID` (optional, recommended for stable identity)
+
+An upload replaces the selected account’s complete FD list while preserving its other asset classes. Workbook validation is all-or-nothing, including duplicate `Deposit ID` checks and derived-value precision bounds. Fixed-deposit values are explicitly presented as simple-interest estimates through the earlier of the valuation date or maturity date; compounding, payout schedules, taxes, and bank-specific terms are not modeled. Values remain denominated in INR.
+
+Spreadsheet uploads are limited by `MAX_UPLOAD_BYTES`, checked against their file signature and expanded archive size, processed from private randomized temporary files, and removed after processing.
+
+### Bank statements
+
+PDF statements are content-hashed per bank account, so an identical upload
+cannot be approved twice. Parsing is explicitly claimed with a recoverable
+lease, combines compatible transaction tables across pages, and produces one
+canonical review format. Approval is a single claim-once transaction; approved
+rows feed analytics as verified data while temporary parsed JSON is removed.
+Statement periods for one account cannot overlap, including shared boundary
+dates. Failed parses can be retried or discarded, account balances are
+recalculated from the preserved opening balance and all verified transactions,
+and deleting a bank account permanently removes its statements, transactions,
+and all private PDF files in that account’s storage. Startup reconciles legacy
+statement directories and files to owner-only permissions and refuses symbolic
+links or special files.
+
+## Database Migrations
+
+Schema changes are versioned in `backend/alembic/versions`. From `backend`, run:
+
 ```bash
-curl -X POST http://localhost:5000/api/accounts \
-  -H "Content-Type: application/json" \
-  -d '{
-    "account_name": "My Account",
-    "api_key": "your_kite_api_key",
-    "api_secret": "your_kite_api_secret",
-    "access_token": "your_access_token"
-  }'
+python -m alembic upgrade head
 ```
 
-Option 2: Use the frontend UI (recommended)
+Run migrations before starting a new application version. `DATABASE_URL` selects the migration and runtime database. Back up an existing database before applying migrations in production.
 
-## Configuration
+## Verification
 
-### Backend (.env)
+Backend:
 
-```env
-SECRET_KEY=your-secret-key
-DATABASE_URL=sqlite:///zerodha_dashboard.db
-ENCRYPTION_KEY=your-fernet-key
-SYNC_INTERVAL_HOURS=12
-CORS_ORIGINS=http://localhost:5173
-```
-
-### Frontend (.env)
-
-```env
-VITE_API_BASE_URL=http://localhost:5000/api
-```
-
-## Features in Detail
-
-### 1. Portfolio Overview
-- Total portfolio value and P&L
-- Day change tracking
-- Holdings count
-- Investment vs current value
-
-### 2. Visualizations
-- **Pie Chart**: Portfolio allocation by stock
-- **Bar Chart**: Sector-wise breakdown
-- **Line Chart**: Portfolio value over time
-- **Heatmap**: Performance tracking
-- **Correlation Matrix**: Stock correlations
-
-### 3. Holdings Management
-- Sortable and filterable holdings table
-- Equity and mutual fund separation
-- Purchase date tracking
-- Real-time P&L calculations
-
-### 4. Analytics
-- Return metrics (total, annualized, daily)
-- Risk metrics (volatility, Sharpe ratio, max drawdown)
-- Top and worst performers
-- Sector analysis
-
-### 5. Multi-Account
-- Aggregated family portfolio view
-- Individual account views
-- Per-account performance tracking
-
-## API Endpoints
-
-### Accounts
-- `GET /api/accounts` - List accounts
-- `POST /api/accounts` - Create account
-- `PUT /api/accounts/:id` - Update account
-- `DELETE /api/accounts/:id` - Delete account
-
-### Holdings
-- `GET /api/holdings` - Get holdings
-- `GET /api/holdings/aggregated` - Aggregated view
-- `POST /api/holdings/sync` - Manual sync
-
-### Analytics
-- `GET /api/analytics/portfolio-value-history`
-- `GET /api/analytics/sector-breakdown`
-- `GET /api/analytics/performance-metrics`
-- `GET /api/analytics/correlation-matrix`
-- `GET /api/analytics/heatmap`
-
-## Security
-
-- **Credential Encryption**: All API keys encrypted using Fernet
-- **Environment Variables**: Sensitive data in .env files
-- **CORS**: Restricted to specific origins
-- **Input Validation**: All user inputs validated
-
-## Development
-
-### Backend Testing
 ```bash
 cd backend
-pytest tests/backend/
+source venv/bin/activate
+python -m pytest tests
 ```
 
-### Code Formatting
-```bash
-black app/
-flake8 app/
-```
+Frontend:
 
-### Frontend Testing
 ```bash
 cd frontend
-npm run test
+npm test
+npm run build
 ```
 
-## Deployment
+For interactive frontend test development, use `npm run test:watch`.
 
-### Option 1: Local Deployment
-- Already configured for local use
-- SQLite database (no setup needed)
-- Access via localhost
+## Security Requirements
 
-### Option 2: Cloud Deployment
-- **Backend**: Deploy to Heroku/DigitalOcean/AWS
-- **Frontend**: Deploy to Vercel/Netlify
-- **Database**: PostgreSQL (managed service recommended)
+- Never commit `backend/.env`, API credentials, request tokens, access tokens, JWTs, uploaded statements, or database files.
+- Use independent, high-entropy `SECRET_KEY` and `JWT_SECRET_KEY` values in production.
+- Generate `ENCRYPTION_KEY` with Fernet and retain it securely. Changing or losing it makes stored Kite credentials unreadable.
+- Set `FLASK_ENV=production`, use HTTPS, and restrict `CORS_ORIGINS` to the deployed frontend origins. Do not use `*`.
+- Set `RATELIMIT_STORAGE=database` in production. The application refuses to
+  start with process-local counters in production.
+- Keep upload limits conservative, run the service as an unprivileged user, and protect database and upload directories with operating-system permissions.
+- Treat the frontend’s JWT storage as sensitive: avoid untrusted scripts and deploy a strict Content Security Policy at the reverse proxy.
+- The built-in scheduler belongs in only one process. In a multi-worker deployment, disable it with `SCHEDULER_ENABLED=false` and run one designated scheduler process.
 
-See `docs/DEPLOYMENT.md` for detailed instructions.
-
-## Troubleshooting
-
-### Backend won't start
-- Check if port 5000 is available
-- Verify ENCRYPTION_KEY is set in .env
-- Check database file permissions
-
-### Frontend can't connect to API
-- Verify backend is running on port 5000
-- Check CORS_ORIGINS in backend .env
-- Check VITE_API_BASE_URL in frontend .env
-
-### Zerodha API errors
-- Verify API credentials are correct
-- Check if access token is valid (expires daily)
-- Ensure Kite Connect subscription is active
-
-## Roadmap
-
-- [ ] Real-time price updates via WebSocket
-- [ ] Tax reporting and capital gains
-- [ ] Portfolio rebalancing suggestions
-- [ ] Mobile app (React Native)
-- [ ] Email/SMS notifications
-- [ ] Comparison with market indices
-- [ ] Goal tracking
-- [ ] Order placement
-
-## License
-
-MIT License - feel free to use for personal projects
-
-## Support
-
-For issues or questions:
-1. Check the troubleshooting section
-2. Review API documentation in `docs/API.md`
-3. Check Zerodha Kite Connect documentation
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
----
-
-**Built with ❤️ for Indian stock market investors**
+Additional backend and frontend details are in [backend/README.md](backend/README.md) and [frontend/README.md](frontend/README.md).

@@ -11,10 +11,12 @@ from app.models.account import Account
 @pytest.fixture
 def app():
     """Create and configure test app"""
-    app = create_app()
-    app.config.update({
+    app = create_app({
         'TESTING': True,
         'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+        'JWT_SECRET_KEY': 'test-jwt-secret-key-at-least-32-bytes',
+        'SECRET_KEY': 'test-secret-key',
+        'SCHEDULER_ENABLED': False,
     })
 
     with app.app_context():

@@ -5,15 +5,18 @@ import re
 import logging
 import os
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Tuple, Optional
 import pdfplumber
+from sqlalchemy import and_, or_
 from app.database import db
 from app.models.bank_statement import BankStatement
 from app.models.parsing_template import ParsingTemplate
 
 logger = logging.getLogger(__name__)
+PARSING_LEASE_MINUTES = 15
+MAX_PDF_PAGES = 200
 
 
 class PDFParserService:
@@ -52,6 +55,10 @@ class PDFParserService:
         try:
             text_content = []
             with pdfplumber.open(pdf_path) as pdf:
+                if len(pdf.pages) > MAX_PDF_PAGES:
+                    raise ValueError(
+                        f'PDF exceeds the maximum of {MAX_PDF_PAGES} pages'
+                    )
                 for page in pdf.pages:
                     page_text = page.extract_text()
                     if page_text:
@@ -59,9 +66,11 @@ class PDFParserService:
 
             return '\n'.join(text_content)
 
-        except Exception as e:
-            logger.error(f"Error extracting text from PDF {pdf_path}: {str(e)}")
-            raise RuntimeError(f"Failed to extract text from PDF: {str(e)}")
+        except ValueError:
+            raise
+        except Exception as error:
+            logger.error("Failed to extract text from bank statement PDF")
+            raise RuntimeError('Failed to extract text from PDF') from error
 
     @staticmethod
     def detect_bank_name(text: str) -> str:
@@ -100,6 +109,10 @@ class PDFParserService:
         try:
             all_tables = []
             with pdfplumber.open(pdf_path) as pdf:
+                if len(pdf.pages) > MAX_PDF_PAGES:
+                    raise ValueError(
+                        f'PDF exceeds the maximum of {MAX_PDF_PAGES} pages'
+                    )
                 for page in pdf.pages:
                     tables = page.extract_tables()
                     if tables:
@@ -107,19 +120,20 @@ class PDFParserService:
 
             return all_tables
 
-        except Exception as e:
-            logger.error(f"Error extracting tables from PDF {pdf_path}: {str(e)}")
-            raise RuntimeError(f"Failed to extract tables from PDF: {str(e)}")
+        except ValueError:
+            raise
+        except Exception as error:
+            logger.error("Failed to extract tables from bank statement PDF")
+            raise RuntimeError('Failed to extract tables from PDF') from error
 
     @staticmethod
     def identify_transaction_table(tables: List[List[List[str]]]) -> Optional[List[List[str]]]:
         """
-        Identify the transaction table from list of extracted tables.
+        Identify the first transaction table from a list of extracted tables.
 
-        Looks for a table with:
-        - 4-6 columns
-        - A date column (contains date patterns)
-        - Amount/balance columns
+        This retains the original single-table return contract for callers
+        that only need detection. Standard extraction uses
+        ``identify_transaction_tables`` so page continuations are not lost.
 
         Args:
             tables: List of tables extracted from PDF
@@ -127,36 +141,141 @@ class PDFParserService:
         Returns:
             Transaction table or None if not found
         """
+        transaction_tables = PDFParserService.identify_transaction_tables(tables)
+        return transaction_tables[0] if transaction_tables else None
+
+    @staticmethod
+    def _header_role(value: object) -> str:
+        """Map bank-specific column labels to their parser role."""
+        header = re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower()).strip()
+
+        if 'date' in header:
+            return 'date'
+        if any(word in header for word in ('description', 'narration', 'particular')):
+            return 'description'
+        if 'debit' in header or 'withdrawal' in header or header == 'dr':
+            return 'debit'
+        if 'credit' in header or 'deposit' in header or header == 'cr':
+            return 'credit'
+        if 'balance' in header or 'closing' in header:
+            return 'balance'
+        return 'other'
+
+    @staticmethod
+    def _header_signature(headers: List[str]) -> Tuple[str, ...]:
+        """Return the ordered parser roles in a table header."""
+        return tuple(
+            PDFParserService._header_role(header)
+            for header in headers
+        )
+
+    @staticmethod
+    def _looks_like_transaction_table(table: List[List[str]]) -> bool:
+        """Return whether a table has a supported transaction-table shape."""
+        if not table or not table[0]:
+            return False
+
+        num_cols = len(table[0])
+        if num_cols < 4 or num_cols > 6:
+            return False
+
+        first_row_is_data = PDFParserService._parse_date(table[0][0]) is not None
+        if not first_row_is_data and len(table) < 2:
+            return False
+
+        data_rows = table if first_row_is_data else table[1:]
+        return any(
+            row
+            and row[0]
+            and PDFParserService._parse_date(row[0]) is not None
+            for row in data_rows[:4]
+        )
+
+    @staticmethod
+    def identify_transaction_tables(
+        tables: List[List[List[str]]],
+    ) -> List[List[List[str]]]:
+        """
+        Identify compatible transaction tables in extraction order.
+
+        Banks commonly repeat the same transaction table on every page.
+        Header aliases are compared by semantic role. A headerless
+        continuation is accepted only when its width matches the first table,
+        allowing it to inherit that table's column mapping safely.
+        """
+        transaction_tables = []
+        reference_signature = None
+        reference_column_count = None
+
         for table in tables:
-            if not table or len(table) < 2:
+            if not PDFParserService._looks_like_transaction_table(table):
                 continue
 
-            # Check if table has 4-6 columns
-            num_cols = len(table[0]) if table[0] else 0
-            if num_cols < 4 or num_cols > 6:
+            first_row_is_data = PDFParserService._parse_date(table[0][0]) is not None
+            if first_row_is_data:
+                if (
+                    reference_signature is not None
+                    and len(table[0]) == reference_column_count
+                ):
+                    transaction_tables.append(table)
                 continue
 
-            # Check if first column looks like dates
-            # Look at first few data rows (skip header)
-            has_date_column = False
-            for row in table[1:4]:  # Check first 3 data rows
-                if not row or not row[0]:
+            signature = PDFParserService._header_signature(table[0])
+            if not ({'debit', 'credit'} & set(signature)):
+                continue
+
+            if reference_signature is None:
+                reference_signature = signature
+                reference_column_count = len(table[0])
+                transaction_tables.append(table)
+            elif signature == reference_signature:
+                transaction_tables.append(table)
+
+        return transaction_tables
+
+    @staticmethod
+    def _is_repeated_header(row: List[str], headers: List[str]) -> bool:
+        """Detect a header repeated inside a continued transaction table."""
+        if not row or PDFParserService._parse_date(row[0]) is not None:
+            return False
+
+        normalize = lambda values: [
+            re.sub(r'\s+', ' ', str(value or '').strip().lower())
+            for value in values
+        ]
+        if normalize(row) == normalize(headers):
+            return True
+
+        row_signature = PDFParserService._header_signature(row)
+        return bool(row_signature) and row_signature == (
+            PDFParserService._header_signature(headers)
+        )
+
+    @staticmethod
+    def _parse_transaction_tables(
+        tables: List[List[List[str]]],
+    ) -> List[Dict]:
+        """Flatten compatible tables into one ordered transaction sequence."""
+        transaction_tables = PDFParserService.identify_transaction_tables(tables)
+        if not transaction_tables:
+            return []
+
+        inherited_headers = transaction_tables[0][0]
+        transactions = []
+
+        for table in transaction_tables:
+            first_row_is_data = PDFParserService._parse_date(table[0][0]) is not None
+            headers = inherited_headers if first_row_is_data else table[0]
+            rows = table if first_row_is_data else table[1:]
+
+            for row in rows:
+                if PDFParserService._is_repeated_header(row, headers):
                     continue
+                transaction = PDFParserService.parse_transaction_row(row, headers)
+                if transaction:
+                    transactions.append(transaction)
 
-                # Check if first cell matches date pattern
-                cell = str(row[0]).strip()
-                for pattern in PDFParserService.DATE_PATTERNS:
-                    if re.match(pattern, cell):
-                        has_date_column = True
-                        break
-
-                if has_date_column:
-                    break
-
-            if has_date_column:
-                return table
-
-        return None
+        return transactions
 
     @staticmethod
     def _parse_date(date_str: str) -> Optional[date]:
@@ -241,9 +360,6 @@ class PDFParserService:
         if not transaction_date:
             return None
 
-        # Build header map (case-insensitive)
-        header_map = {h.lower().strip(): i for i, h in enumerate(headers) if h}
-
         # Extract description (usually second column)
         description = str(row[1]).strip() if len(row) > 1 else ''
         if not description:
@@ -254,12 +370,13 @@ class PDFParserService:
         credit_idx = None
         balance_idx = None
 
-        for header, idx in header_map.items():
-            if 'debit' in header or 'withdrawal' in header or 'dr' == header:
+        for idx, header in enumerate(headers):
+            role = PDFParserService._header_role(header)
+            if role == 'debit':
                 debit_idx = idx
-            elif 'credit' in header or 'deposit' in header or 'cr' == header:
+            elif role == 'credit':
                 credit_idx = idx
-            elif 'balance' in header or 'closing' in header:
+            elif role == 'balance':
                 balance_idx = idx
 
         # Parse amounts
@@ -345,31 +462,12 @@ class PDFParserService:
 
     @staticmethod
     def find_template(bank_name: str) -> Optional[ParsingTemplate]:
+        """Return no legacy user-derived global template.
+
+        Older rows remain in the schema so existing databases upgrade safely,
+        but private statement layouts are not shared between tenants.
         """
-        Find active parsing template for a bank.
-
-        Args:
-            bank_name: Bank name (normalized)
-
-        Returns:
-            Most recently used active ParsingTemplate or None
-        """
-        if not bank_name or bank_name == 'Unknown':
-            return None
-
-        template = ParsingTemplate.query.filter_by(
-            bank_name=bank_name,
-            is_active=True
-        ).order_by(
-            ParsingTemplate.last_used_at.desc().nullslast(),
-            ParsingTemplate.success_count.desc()
-        ).first()
-
-        if template:
-            logger.info(f"Found template {template.id} for {bank_name} "
-                       f"(v{template.template_version}, {template.success_count} successes)")
-
-        return template
+        return None
 
     @staticmethod
     def extract_with_template(pdf_path: str, template: ParsingTemplate) -> Tuple[List[Dict], float]:
@@ -402,23 +500,9 @@ class PDFParserService:
                 if not tables:
                     raise RuntimeError("No tables found in PDF")
 
-                # Find transaction table using template hints
-                transaction_table = PDFParserService.identify_transaction_table(tables)
-                if not transaction_table:
-                    raise RuntimeError("No transaction table found")
-
-                # Parse transactions using template column mapping
-                headers = transaction_table[0]
-                transactions = []
-                column_map = config.get('columns', {})
-
-                for row in transaction_table[1:]:
-                    txn = PDFParserService.parse_transaction_row(row, headers)
-                    if txn:
-                        transactions.append(txn)
-
+                transactions = PDFParserService._parse_transaction_tables(tables)
                 if not transactions:
-                    raise RuntimeError("No transactions extracted using template")
+                    raise RuntimeError("No transaction table found")
 
                 # Validate extracted data
                 is_valid, errors = PDFParserService.validate_transactions(transactions)
@@ -436,12 +520,12 @@ class PDFParserService:
                 # For now, fall back to standard extraction
                 raise RuntimeError(f"Unsupported parsing method in template: {parsing_method}")
 
-        except Exception as e:
-            logger.warning(f"Template extraction failed: {str(e)}")
+        except Exception as error:
+            logger.warning("Bank statement template extraction failed")
             # Mark template failure
             template.mark_failure()
             db.session.commit()
-            raise RuntimeError(f"Template extraction failed: {str(e)}")
+            raise RuntimeError('Template extraction failed') from error
 
     @staticmethod
     def extract_with_pdfplumber(pdf_path: str) -> Tuple[List[Dict], float]:
@@ -465,22 +549,9 @@ class PDFParserService:
             if not tables:
                 raise RuntimeError("No tables found in PDF")
 
-            # Find transaction table
-            transaction_table = PDFParserService.identify_transaction_table(tables)
-            if not transaction_table:
-                raise RuntimeError("No transaction table found")
-
-            # Parse transactions
-            headers = transaction_table[0]
-            transactions = []
-
-            for row in transaction_table[1:]:
-                txn = PDFParserService.parse_transaction_row(row, headers)
-                if txn:
-                    transactions.append(txn)
-
+            transactions = PDFParserService._parse_transaction_tables(tables)
             if not transactions:
-                raise RuntimeError("No valid transactions extracted")
+                raise RuntimeError("No transaction table found")
 
             # Validate
             is_valid, errors = PDFParserService.validate_transactions(transactions)
@@ -493,8 +564,8 @@ class PDFParserService:
 
             return transactions, confidence
 
-        except Exception as e:
-            logger.error(f"PDFPlumber extraction failed: {str(e)}")
+        except Exception:
+            logger.error("PDF table extraction failed")
             raise
 
     @staticmethod
@@ -587,9 +658,9 @@ class PDFParserService:
             # transactions = parse_ai_response(result)
             # return transactions, 0.95
 
-        except Exception as e:
-            logger.error(f"AI fallback failed: {str(e)}")
-            raise RuntimeError(f"AI extraction failed: {str(e)}")
+        except Exception as error:
+            logger.error("AI bank statement extraction failed")
+            raise RuntimeError('AI extraction failed') from error
 
     @staticmethod
     def parse_statement(statement_id: int) -> Dict:
@@ -607,15 +678,46 @@ class PDFParserService:
             RuntimeError: If PDF processing fails
         """
         # Load statement from DB
-        statement = BankStatement.query.get(statement_id)
+        statement = db.session.get(BankStatement, statement_id)
         if not statement:
             raise ValueError(f"Statement not found: {statement_id}")
 
-        try:
-            # Update status to parsing
-            statement.status = 'parsing'
-            db.session.commit()
+        stale_before = datetime.utcnow() - timedelta(
+            minutes=PARSING_LEASE_MINUTES
+        )
+        lease_started_at = datetime.utcnow()
+        claimed = (
+            BankStatement.query.filter(
+                BankStatement.id == statement_id,
+                or_(
+                    BankStatement.status.in_(['uploaded', 'failed']),
+                    and_(
+                        BankStatement.status == 'parsing',
+                        or_(
+                            BankStatement.parsing_started_at.is_(None),
+                            BankStatement.parsing_started_at <= stale_before,
+                        ),
+                    ),
+                ),
+            )
+            .update(
+                {
+                    'status': 'parsing',
+                    'parsing_started_at': lease_started_at,
+                    'error_message': None,
+                },
+                synchronize_session=False,
+            )
+        )
+        if claimed != 1:
+            db.session.rollback()
+            raise ValueError(
+                'Statement is already being parsed or cannot be parsed'
+            )
+        db.session.commit()
+        statement = db.session.get(BankStatement, statement_id)
 
+        try:
             logger.info(f"Starting parsing for statement {statement_id}")
 
             # Extract text
@@ -642,8 +744,10 @@ class PDFParserService:
                     template.mark_success()
                     db.session.commit()
 
-                except Exception as template_error:
-                    logger.warning(f"Template extraction failed, falling back: {template_error}")
+                except Exception:
+                    logger.warning(
+                        "Template extraction failed; using standard parser"
+                    )
                     transactions = None
 
             # Fall back to pdfplumber if no template or template failed
@@ -665,12 +769,23 @@ class PDFParserService:
                                 logger.info(f"AI extraction better: {ai_confidence:.2f} > {confidence:.2f}")
                                 transactions = ai_transactions
                                 confidence = ai_confidence
-                        except Exception as ai_error:
-                            logger.warning(f"AI fallback failed, using pdfplumber results: {ai_error}")
+                        except Exception:
+                            logger.warning(
+                                "AI fallback failed; using standard parser results"
+                            )
                             # Keep pdfplumber results even if AI fails
 
-                except Exception as e:
-                    logger.error(f"PDFPlumber extraction failed: {str(e)}")
+                except Exception as extraction_error:
+                    logger.error("Standard bank statement extraction failed")
+
+                    # An empty table scan is a deterministic validation
+                    # failure, not an infrastructure failure. Keep the
+                    # actionable domain error instead of obscuring it behind
+                    # an optional AI-provider configuration error.
+                    if str(extraction_error) == "No tables found in PDF":
+                        raise ValueError(
+                            "No transaction table found in PDF"
+                        ) from extraction_error
 
                     # Try AI as last resort
                     logger.info("Attempting AI fallback as last resort")
@@ -680,8 +795,10 @@ class PDFParserService:
                         )
                         logger.info(f"AI extraction successful with confidence {confidence:.2f}")
                     except Exception as ai_error:
-                        logger.error(f"AI fallback also failed: {ai_error}")
-                        raise ValueError(f"All extraction methods failed. PDFPlumber: {str(e)}, AI: {str(ai_error)}")
+                        logger.error("All bank statement extraction methods failed")
+                        raise ValueError(
+                            "All extraction methods failed"
+                        ) from ai_error
 
             if not transactions:
                 raise ValueError("No valid transactions found in PDF")
@@ -691,30 +808,24 @@ class PDFParserService:
 
             # Extract statement period from transactions
             transaction_dates = [txn['date'] for txn in transactions if txn.get('date')]
+            period_start = statement.statement_period_start
+            period_end = statement.statement_period_end
             if transaction_dates:
                 period_start = min(transaction_dates)
                 period_end = max(transaction_dates)
 
-                # Update statement period dates
-                statement.statement_period_start = period_start
-                statement.statement_period_end = period_end
-
                 # Check for duplicate statement
                 from app.services.bank_statement_service import BankStatementService
-                is_duplicate = BankStatementService.detect_duplicate_statement(
-                    statement.bank_account_id,
-                    period_start,
-                    period_end
-                )
-
-                if is_duplicate:
-                    # Add warning but don't fail - let user decide
-                    if validation_errors is None:
-                        validation_errors = []
-                    validation_errors.append(
-                        f"Warning: A statement for period {period_start} to {period_end} "
-                        "already exists for this account."
+                duplicate_statement = (
+                    BankStatementService.find_duplicate_statement(
+                        statement.bank_account_id,
+                        period_start,
+                        period_end,
+                        exclude_statement_id=statement.id,
                     )
+                )
+            else:
+                duplicate_statement = None
 
             # Convert Decimal and date to serializable formats for JSON storage
             serializable_transactions = []
@@ -724,7 +835,11 @@ class PDFParserService:
                     'description': txn['description'],
                     'amount': str(txn['amount']),
                     'transaction_type': txn['transaction_type'],
-                    'balance': str(txn['balance']) if txn.get('balance') else None
+                    'balance': (
+                        str(txn['balance'])
+                        if txn.get('balance') is not None
+                        else None
+                    )
                 })
 
             # Prepare parsed data
@@ -734,15 +849,36 @@ class PDFParserService:
                 'is_valid': is_valid,
                 'validation_errors': validation_errors,
                 'parsed_count': len(transactions),
-                'used_template_id': used_template_id
+                'used_template_id': used_template_id,
+                'duplicate_statement_id': (
+                    duplicate_statement.id if duplicate_statement else None
+                ),
             }
 
-            # Update statement with parsed data and template reference
-            statement.parsed_data = parsed_data
+            # The exact lease timestamp is the ownership token. A worker whose
+            # stale lease was reclaimed must never overwrite the new worker's
+            # review result.
+            review_values = {
+                'statement_period_start': period_start,
+                'statement_period_end': period_end,
+                'parsed_data': parsed_data,
+                'status': 'review',
+                'error_message': None,
+                'parsing_started_at': None,
+            }
             if used_template_id:
-                statement.parsing_template_id = used_template_id
-            statement.status = 'review'
-            statement.error_message = None
+                review_values['parsing_template_id'] = used_template_id
+            completed = (
+                BankStatement.query.filter(
+                    BankStatement.id == statement_id,
+                    BankStatement.status == 'parsing',
+                    BankStatement.parsing_started_at == lease_started_at,
+                )
+                .update(review_values, synchronize_session=False)
+            )
+            if completed != 1:
+                db.session.rollback()
+                raise ValueError('Statement parsing lease was lost')
             db.session.commit()
 
             logger.info(f"Successfully parsed statement {statement_id}")
@@ -756,13 +892,31 @@ class PDFParserService:
                 'parsed_count': len(transactions)
             }
 
-        except Exception as e:
-            # Update statement status to failed
-            statement.status = 'failed'
-            statement.error_message = str(e)
-            db.session.commit()
+        except Exception:
+            # Only the current lease owner may publish a failure. If another
+            # worker reclaimed this lease, preserve that worker's state.
+            db.session.rollback()
+            failed = (
+                BankStatement.query.filter(
+                    BankStatement.id == statement_id,
+                    BankStatement.status == 'parsing',
+                    BankStatement.parsing_started_at == lease_started_at,
+                )
+                .update(
+                    {
+                        'status': 'failed',
+                        'error_message': 'Statement parsing failed',
+                        'parsing_started_at': None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if failed:
+                db.session.commit()
+            else:
+                db.session.rollback()
 
-            logger.error(f"Failed to parse statement {statement_id}: {str(e)}")
+            logger.error("Failed to parse statement %s", statement_id)
             raise
 
     @staticmethod
@@ -784,7 +938,7 @@ class PDFParserService:
         # Check for missing critical fields
         for i, txn in enumerate(transactions):
             # Missing date
-            if not txn.get('date'):
+            if not txn.get('transaction_date'):
                 warnings.append({
                     'type': 'missing_date',
                     'message': f'Transaction at row {i + 1} is missing date',
@@ -814,8 +968,8 @@ class PDFParserService:
             curr_txn = transactions[i]
 
             # Skip if either doesn't have balance
-            prev_balance_str = prev_txn.get('balance')
-            curr_balance_str = curr_txn.get('balance')
+            prev_balance_str = prev_txn.get('running_balance')
+            curr_balance_str = curr_txn.get('running_balance')
 
             if not prev_balance_str or not curr_balance_str:
                 continue
@@ -841,9 +995,9 @@ class PDFParserService:
                         'severity': 'warning'
                     })
 
-            except (InvalidOperation, ValueError) as e:
+            except (InvalidOperation, ValueError):
                 # If we can't parse the numbers, skip this check
-                logger.warning(f"Error checking balance consistency: {str(e)}")
+                logger.warning("Skipped an invalid balance consistency row")
                 continue
 
         return warnings

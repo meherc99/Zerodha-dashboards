@@ -27,7 +27,6 @@ export const useAccountsStore = defineStore('accounts', {
         this.accounts = response.data.accounts
       } catch (error) {
         this.error = error.response?.data?.error || 'Failed to fetch accounts'
-        console.error('Error fetching accounts:', error)
       } finally {
         this.loading = false
       }
@@ -53,7 +52,9 @@ export const useAccountsStore = defineStore('accounts', {
       this.error = null
       try {
         const response = await api.updateAccount(accountId, accountData)
-        const index = this.accounts.findIndex(a => a.id === accountId)
+        const index = this.accounts.findIndex(
+          account => Number(account.id) === Number(accountId)
+        )
         if (index !== -1) {
           this.accounts[index] = response.data
         }
@@ -64,6 +65,12 @@ export const useAccountsStore = defineStore('accounts', {
       } finally {
         this.loading = false
       }
+    },
+
+    async reconnectAccount(accountId, requestToken) {
+      return this.updateAccount(accountId, {
+        request_token: requestToken
+      })
     },
 
     async deleteAccount(accountId) {

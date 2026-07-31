@@ -40,6 +40,10 @@ const props = defineProps({
   title: {
     type: String,
     default: ''
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
@@ -58,8 +62,8 @@ const chartData = computed(() => {
     datasets: [{
       label: 'Portfolio Value',
       data: values,
-      borderColor: '#36A2EB',
-      backgroundColor: 'rgba(54, 162, 235, 0.1)',
+      borderColor: '#246bfd',
+      backgroundColor: 'rgba(36, 107, 253, 0.10)',
       fill: true,
       tension: 0.4,
       pointRadius: 3,
@@ -68,7 +72,20 @@ const chartData = computed(() => {
   }
 })
 
-const chartOptions = {
+const moneyFormatter = computed(() => new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: props.currency,
+  maximumFractionDigits: 0
+}))
+
+const compactMoneyFormatter = computed(() => new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: props.currency,
+  notation: 'compact',
+  maximumFractionDigits: 1
+}))
+
+const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: {
@@ -91,7 +108,7 @@ const chartOptions = {
     tooltip: {
       callbacks: {
         label: (context) => {
-          return `Value: ₹${context.parsed.y.toLocaleString('en-IN')}`
+          return `Value: ${moneyFormatter.value.format(context.parsed.y)}`
         }
       }
     }
@@ -105,11 +122,11 @@ const chartOptions = {
     y: {
       beginAtZero: false,
       ticks: {
-        callback: (value) => `₹${(value / 1000).toFixed(0)}k`
+        callback: (value) => compactMoneyFormatter.value.format(value)
       }
     }
   }
-}
+}))
 </script>
 
 <style scoped>

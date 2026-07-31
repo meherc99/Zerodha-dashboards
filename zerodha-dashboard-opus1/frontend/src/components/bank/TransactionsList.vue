@@ -158,16 +158,22 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { format, parseISO } from 'date-fns'
 import { useBankAccountsStore } from '@/stores/bankAccounts'
 import { useCategoriesStore } from '@/stores/categories'
+import { buildTransactionQuery } from '@/utils/transactions'
+import { formatCurrency as formatMoney } from '@/utils/currency'
 
 const props = defineProps({
   accountId: {
     type: Number,
     required: true
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
@@ -211,10 +217,10 @@ function formatDate(dateString) {
 }
 
 function formatCurrency(value) {
-  return `₹${Math.abs(value || 0).toLocaleString('en-IN', {
+  return formatMoney(Math.abs(Number(value) || 0), props.currency, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  })}`
+  })
 }
 
 function formatAmount(amount, type) {
@@ -223,39 +229,43 @@ function formatAmount(amount, type) {
 }
 
 async function loadTransactions() {
+  const requestId = ++transactionLoadGeneration
   loading.value = true
   error.value = null
 
   try {
-    const params = {
+    const params = buildTransactionQuery({
       page: pagination.value.currentPage,
-      per_page: pagination.value.perPage,
-      sort_by: filters.value.sortBy
-    }
-
-    if (filters.value.search) params.search = filters.value.search
-    if (filters.value.transactionType) params.transaction_type = filters.value.transactionType
-    if (filters.value.categoryId) params.category_id = filters.value.categoryId
+      limit: pagination.value.perPage,
+      search: filters.value.search,
+      transactionType: filters.value.transactionType,
+      categoryId: filters.value.categoryId,
+      sortBy: filters.value.sortBy
+    })
 
     const response = await bankStore.fetchTransactions(props.accountId, params)
+    if (!response || requestId !== transactionLoadGeneration) return
 
     transactions.value = response.transactions
     pagination.value = {
       currentPage: response.page,
       totalPages: response.pages,
       totalItems: response.total,
-      perPage: response.per_page
+      perPage: response.limit
     }
   } catch (err) {
+    if (requestId !== transactionLoadGeneration) return
     error.value = err.response?.data?.error || 'Failed to load transactions'
-    console.error('Error loading transactions:', err)
   } finally {
-    loading.value = false
+    if (requestId === transactionLoadGeneration) {
+      loading.value = false
+    }
   }
 }
 
 // Debounce timer for search input
 let searchDebounceTimer = null
+let transactionLoadGeneration = 0
 
 function handleSearchInput() {
   // Clear existing timer
@@ -313,7 +323,6 @@ async function saveEdit() {
     await loadTransactions()
   } catch (err) {
     error.value = err.response?.data?.error || 'Failed to update transaction'
-    console.error('Error updating transaction:', err)
   }
 }
 
@@ -325,7 +334,6 @@ async function handleDelete(transaction) {
     await loadTransactions()
   } catch (err) {
     error.value = err.response?.data?.error || 'Failed to delete transaction'
-    console.error('Error deleting transaction:', err)
   }
 }
 
@@ -336,7 +344,12 @@ watch(() => props.accountId, () => {
 
 onMounted(() => {
   categoriesStore.fetchCategories()
-  loadTransactions()
+})
+
+onBeforeUnmount(() => {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
 })
 </script>
 

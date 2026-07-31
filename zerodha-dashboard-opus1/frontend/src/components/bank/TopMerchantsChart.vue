@@ -16,6 +16,7 @@ import {
   Tooltip,
   Legend
 } from 'chart.js'
+import { formatCurrency } from '@/utils/currency'
 
 ChartJS.register(
   CategoryScale,
@@ -35,6 +36,10 @@ const props = defineProps({
   title: {
     type: String,
     default: 'Top Merchants'
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
@@ -86,7 +91,7 @@ const chartOptions = {
           const dataPoint = props.data[context.dataIndex]
           const count = dataPoint?.transaction_count || 0
           return [
-            `Amount: ₹${amount.toLocaleString('en-IN', {
+            `Amount: ${formatCurrency(amount, props.currency, {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2
             })}`,
@@ -103,7 +108,10 @@ const chartOptions = {
         color: 'rgba(0, 0, 0, 0.05)'
       },
       ticks: {
-        callback: (value) => `₹${(value / 1000).toFixed(0)}k`,
+        callback: value => formatCurrency(value, props.currency, {
+          maximumFractionDigits: 0,
+          notation: 'compact'
+        }),
         font: {
           size: 11
         }

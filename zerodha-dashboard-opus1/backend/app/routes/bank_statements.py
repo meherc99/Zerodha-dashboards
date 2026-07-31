@@ -3,8 +3,11 @@ Bank statement endpoints for uploading and managing PDF bank statements.
 """
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from app.database import db
 from app.services.bank_statement_service import BankStatementService
 from app.models.bank_account import BankAccount
+from app.models.bank_statement import BankStatement
+from app.services.pdf_parser_service import PDFParserService
 from app.utils.rate_limiter import user_rate_limit
 import logging
 
@@ -39,7 +42,8 @@ def upload_statement(account_id):
     # Verify bank account exists and belongs to user
     account = BankAccount.query.filter_by(
         id=account_id,
-        user_id=user_id
+        user_id=user_id,
+        is_active=True,
     ).first()
 
     if not account:
@@ -72,15 +76,73 @@ def upload_statement(account_id):
         logger.warning(f"Validation error during upload: {str(e)}")
         return jsonify({'error': str(e)}), 400
 
-    except RuntimeError as e:
+    except RuntimeError:
         # Server/processing errors
-        logger.error(f"Runtime error during upload: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-    except Exception as e:
-        # Unexpected errors
-        logger.error(f"Unexpected error during upload: {str(e)}")
+        logger.error("Bank statement upload failed for account %s", account_id)
         return jsonify({'error': 'Failed to upload statement'}), 500
+
+    except Exception:
+        # Unexpected errors
+        logger.error(
+            "Unexpected bank statement upload failure for account %s",
+            account_id,
+        )
+        return jsonify({'error': 'Failed to upload statement'}), 500
+
+
+@bank_statements_bp.route(
+    '/statements/<int:statement_id>/parse',
+    methods=['POST'],
+)
+@jwt_required()
+@user_rate_limit(max_requests=10, window_minutes=60)
+def parse_statement(statement_id):
+    """Synchronously parse one uploaded statement owned by the current user."""
+    user_id = int(get_jwt_identity())
+    statement = (
+        db.session.query(BankStatement)
+        .join(BankAccount)
+        .filter(
+            BankStatement.id == statement_id,
+            BankAccount.user_id == user_id,
+            BankAccount.is_active.is_(True),
+        )
+        .first()
+    )
+    if not statement:
+        return jsonify({'error': 'Statement not found'}), 404
+    if statement.status == 'review':
+        return jsonify({'statement_id': statement.id, 'status': 'review'}), 200
+    if statement.status in {
+        'uploading',
+        'approving',
+        'approved',
+        'deleting',
+    }:
+        return jsonify({
+            'error': f'Statement cannot be parsed while {statement.status}'
+        }), 409
+
+    try:
+        PDFParserService.parse_statement(statement.id)
+        return jsonify({
+            'statement_id': statement.id,
+            'status': 'review',
+        }), 200
+    except ValueError as error:
+        if 'already being parsed' in str(error):
+            return jsonify({'error': str(error)}), 409
+        logger.error("Statement parsing failed for statement %s", statement.id)
+        return jsonify({'error': 'Statement parsing failed'}), 422
+    except RuntimeError:
+        logger.error("Statement parsing failed for statement %s", statement.id)
+        return jsonify({'error': 'Statement parsing failed'}), 422
+    except Exception:
+        logger.error(
+            "Unexpected statement parsing failure for statement %s",
+            statement.id,
+        )
+        return jsonify({'error': 'Statement parsing failed'}), 500
 
 
 @bank_statements_bp.route('/bank-accounts/<int:account_id>/statements', methods=['GET'])
@@ -115,8 +177,8 @@ def list_statements(account_id):
         # Bank account not found or doesn't belong to user
         return jsonify({'error': str(e)}), 404
 
-    except Exception as e:
-        logger.error(f"Error listing statements: {str(e)}")
+    except Exception:
+        logger.error("Failed to list statements for account %s", account_id)
         return jsonify({'error': 'Failed to list statements'}), 500
 
 
@@ -149,11 +211,10 @@ def get_statement(statement_id):
         return jsonify(statement), 200
 
     except ValueError as e:
-        # Statement not found or doesn't belong to user
         return jsonify({'error': str(e)}), 404
 
-    except Exception as e:
-        logger.error(f"Error getting statement details: {str(e)}")
+    except Exception:
+        logger.error("Failed to get statement %s", statement_id)
         return jsonify({'error': 'Failed to get statement'}), 500
 
 
@@ -188,15 +249,16 @@ def delete_statement(statement_id):
         return jsonify({'message': 'Statement deleted successfully'}), 200
 
     except ValueError as e:
-        # Statement not found or doesn't belong to user
+        if 'busy' in str(e).lower():
+            return jsonify({'error': str(e)}), 409
         return jsonify({'error': str(e)}), 404
 
-    except RuntimeError as e:
-        logger.error(f"Runtime error deleting statement: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    except RuntimeError:
+        logger.error("Failed to delete statement %s", statement_id)
+        return jsonify({'error': 'Failed to delete statement'}), 500
 
-    except Exception as e:
-        logger.error(f"Unexpected error deleting statement: {str(e)}")
+    except Exception:
+        logger.error("Unexpected failure deleting statement %s", statement_id)
         return jsonify({'error': 'Failed to delete statement'}), 500
 
 
@@ -237,8 +299,8 @@ def get_statement_preview(statement_id):
         else:
             return jsonify({'error': error_msg}), 400
 
-    except Exception as e:
-        logger.error(f"Error getting statement preview: {str(e)}")
+    except Exception:
+        logger.error("Failed to get preview for statement %s", statement_id)
         return jsonify({'error': 'Failed to get statement preview'}), 500
 
 
@@ -283,9 +345,14 @@ def approve_statement(statement_id):
     if not request.is_json:
         return jsonify({'error': 'Content-Type must be application/json'}), 400
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
 
     # Validate request body
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid JSON data'}), 400
+    unexpected = sorted(set(data) - {'transactions'})
+    if unexpected:
+        return jsonify({'error': f'Unsupported field: {unexpected[0]}'}), 400
     if 'transactions' not in data:
         return jsonify({'error': 'Missing transactions field'}), 400
 
@@ -317,10 +384,10 @@ def approve_statement(statement_id):
         else:
             return jsonify({'error': error_msg}), 400
 
-    except RuntimeError as e:
-        logger.error(f"Runtime error approving statement: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    except RuntimeError:
+        logger.error("Failed to approve statement %s", statement_id)
+        return jsonify({'error': 'Failed to approve statement'}), 500
 
-    except Exception as e:
-        logger.error(f"Unexpected error approving statement: {str(e)}")
+    except Exception:
+        logger.error("Unexpected failure approving statement %s", statement_id)
         return jsonify({'error': 'Failed to approve statement'}), 500

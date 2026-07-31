@@ -1,293 +1,316 @@
-"""
-Fixed Deposit service for parsing Excel files and managing FD holdings.
-"""
-import pandas as pd
-from datetime import datetime, date
-from decimal import Decimal
-from app.models.holding import Holding
-from app.models.snapshot import Snapshot
-from app.database import db
+"""Fixed-deposit import and valuation service."""
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import logging
 
+import pandas as pd
+
+from app.database import db
+from app.models.holding import Holding
+from app.models.snapshot import Snapshot
+from app.services.portfolio_service import PortfolioService
+
+
 logger = logging.getLogger(__name__)
+DB_MONEY_MAX = Decimal('9999999999999.99')
+MONEY_QUANTUM = Decimal('0.01')
+
+
+def _fits_decimal(value, maximum, decimal_places):
+    quantum = Decimal('1').scaleb(-decimal_places)
+    try:
+        return abs(value) <= maximum and value == value.quantize(quantum)
+    except InvalidOperation:
+        return False
+
+
+def _decimal(value):
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError('Expected a valid number')
+    if not result.is_finite():
+        raise ValueError('Expected a finite number')
+    return result
+
+
+def _date(value):
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    parsed = pd.to_datetime(value, errors='raise')
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
 
 
 class FDService:
-    """Service for managing Fixed Deposit holdings"""
+    """Manage fixed deposits as first-class INR holdings."""
 
     @staticmethod
-    def calculate_fd_returns(investment_amount, investment_date, interest_rate, maturity_date=None):
-        """
-        Calculate FD returns and current value.
-
-        Args:
-            investment_amount: Principal amount invested
-            investment_date: Date of investment (datetime or date object)
-            interest_rate: Annual interest rate (as percentage, e.g., 7.5 for 7.5%)
-            maturity_date: Optional maturity date (if None, calculates till today)
-
-        Returns:
-            dict: {
-                'days_elapsed': int,
-                'years_elapsed': float,
-                'interest_earned': float,
-                'current_value': float
-            }
-        """
-        try:
-            # Convert to date if datetime
-            if isinstance(investment_date, datetime):
-                investment_date = investment_date.date()
-
-            # Calculate till maturity or today
-            if maturity_date:
-                if isinstance(maturity_date, datetime):
-                    maturity_date = maturity_date.date()
-                end_date = maturity_date
-            else:
-                end_date = date.today()
-
-            # Calculate days elapsed
-            days_elapsed = (end_date - investment_date).days
-
-            # Handle negative days (future investment date)
-            if days_elapsed < 0:
-                return {
-                    'days_elapsed': 0,
-                    'years_elapsed': 0,
-                    'interest_earned': 0,
-                    'current_value': float(investment_amount)
-                }
-
-            # Calculate years (for interest calculation)
-            years_elapsed = days_elapsed / 365.0
-
-            # Calculate simple interest: P * R * T / 100
-            interest_earned = (
-                float(investment_amount) *
-                float(interest_rate) *
-                years_elapsed / 100.0
+    def calculate_fd_returns(
+        investment_amount,
+        investment_date,
+        interest_rate,
+        maturity_date=None,
+        valuation_date=None,
+    ):
+        """Accrue simple interest only through today or maturity, whichever is first."""
+        principal = _decimal(investment_amount)
+        rate = _decimal(interest_rate)
+        invested_on = _date(investment_date)
+        maturity = _date(maturity_date)
+        if principal <= 0:
+            raise ValueError('Investment amount must be positive')
+        if not _fits_decimal(principal, DB_MONEY_MAX, 2):
+            raise ValueError('Investment amount exceeds database precision')
+        if rate < 0 or rate > 100:
+            raise ValueError('Interest rate must be between 0 and 100')
+        if not _fits_decimal(rate, Decimal('999.9999'), 4):
+            raise ValueError('Interest rate exceeds database precision')
+        if invested_on is None:
+            raise ValueError('Investment date is required')
+        if maturity and maturity < invested_on:
+            raise ValueError('Maturity date cannot precede investment date')
+        valued_on = _date(valuation_date) or date.today()
+        accrual_end = min(valued_on, maturity) if maturity else valued_on
+        days_elapsed = max((accrual_end - invested_on).days, 0)
+        years_elapsed = Decimal(days_elapsed) / Decimal('365')
+        interest = (
+            principal * rate * years_elapsed / Decimal('100')
+        ).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+        current_value = (principal + interest).quantize(
+            MONEY_QUANTUM,
+            rounding=ROUND_HALF_UP,
+        )
+        if (
+            not _fits_decimal(interest, DB_MONEY_MAX, 2)
+            or not _fits_decimal(current_value, DB_MONEY_MAX, 2)
+        ):
+            raise ValueError(
+                'Fixed-deposit value exceeds database precision'
             )
-
-            current_value = float(investment_amount) + interest_earned
-
-            return {
-                'days_elapsed': days_elapsed,
-                'years_elapsed': round(years_elapsed, 2),
-                'interest_earned': round(interest_earned, 2),
-                'current_value': round(current_value, 2)
-            }
-
-        except Exception as e:
-            logger.error(f"Error calculating FD returns: {str(e)}")
-            return {
-                'days_elapsed': 0,
-                'years_elapsed': 0,
-                'interest_earned': 0,
-                'current_value': float(investment_amount)
-            }
+        return {
+            'days_elapsed': days_elapsed,
+            'years_elapsed': round(float(years_elapsed), 4),
+            'interest_earned': interest,
+            'current_value': current_value,
+            'valuation_date': accrual_end.isoformat(),
+            'is_matured': bool(maturity and valued_on >= maturity),
+        }
 
     def parse_excel_file(self, file_path):
-        """
-        Parse Excel file and return list of FD holdings.
+        df = pd.read_excel(file_path, nrows=5001)
+        if len(df.index) > 5000:
+            raise ValueError('A fixed-deposit workbook may contain at most 5000 rows')
+        required = {
+            'Bank Name',
+            'Investment Amount',
+            'Investment Date',
+            'Interest Rate',
+        }
+        missing = sorted(required - set(df.columns))
+        if missing:
+            raise ValueError(f"Missing required columns: {', '.join(missing)}")
 
-        Expected columns: Bank Name, Investment Amount, Investment Date, Interest Rate, Maturity Date (optional)
-
-        Args:
-            file_path: Path to Excel file
-
-        Returns:
-            list: List of FD dictionaries
-
-        Raises:
-            ValueError: If required columns are missing or data is invalid
-        """
-        try:
-            df = pd.read_excel(file_path)
-
-            # Validate required columns
-            required_cols = ['Bank Name', 'Investment Amount', 'Investment Date', 'Interest Rate']
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            if missing_cols:
-                raise ValueError(f"Missing required columns: {', '.join(missing_cols)}")
-
-            fds = []
-            for idx, row in df.iterrows():
-                # Skip empty rows
+        deposits = []
+        errors = []
+        seen_deposit_ids = set()
+        for index, row in df.iterrows():
+            row_number = int(index) + 2
+            if row.isna().all():
+                continue
+            try:
                 if pd.isna(row['Bank Name']):
-                    continue
+                    raise ValueError('Bank Name is required')
+                bank_name = str(row['Bank Name']).strip()
+                if not 1 <= len(bank_name) <= 100:
+                    raise ValueError('Bank Name must contain 1-100 characters')
+                principal = _decimal(row['Investment Amount'])
+                rate = _decimal(row['Interest Rate'])
+                if principal <= 0:
+                    raise ValueError('Investment Amount must be positive')
+                if rate <= 0 or rate > 100:
+                    raise ValueError('Interest Rate must be between 0 and 100')
+                if not _fits_decimal(principal, DB_MONEY_MAX, 2):
+                    raise ValueError(
+                        'Investment Amount exceeds database precision'
+                    )
+                if not _fits_decimal(rate, Decimal('999.9999'), 4):
+                    raise ValueError(
+                        'Interest Rate exceeds database precision'
+                    )
+                invested_on = _date(row['Investment Date'])
+                if invested_on is None:
+                    raise ValueError('Investment Date is required')
+                maturity = None
+                if 'Maturity Date' in df.columns and not pd.isna(
+                    row['Maturity Date']
+                ):
+                    maturity = _date(row['Maturity Date'])
+                    if maturity < invested_on:
+                        raise ValueError(
+                            'Maturity Date cannot precede Investment Date'
+                        )
 
-                try:
-                    # Parse investment date
-                    if isinstance(row['Investment Date'], datetime):
-                        investment_date = row['Investment Date']
-                    else:
-                        investment_date = pd.to_datetime(row['Investment Date'])
+                deposit_id = None
+                if 'Deposit ID' in df.columns and not pd.isna(row['Deposit ID']):
+                    deposit_id = str(row['Deposit ID']).strip() or None
+                    if deposit_id and len(deposit_id) > 200:
+                        raise ValueError(
+                            'Deposit ID must contain at most 200 characters'
+                        )
+                    if deposit_id in seen_deposit_ids:
+                        raise ValueError(f'Duplicate Deposit ID {deposit_id}')
+                    if deposit_id:
+                        seen_deposit_ids.add(deposit_id)
 
-                    # Parse maturity date (optional)
-                    maturity_date = None
-                    if 'Maturity Date' in df.columns and not pd.isna(row['Maturity Date']):
-                        if isinstance(row['Maturity Date'], datetime):
-                            maturity_date = row['Maturity Date']
-                        else:
-                            try:
-                                maturity_date = pd.to_datetime(row['Maturity Date'])
-                            except:
-                                logger.warning(f"Row {idx + 2}: Could not parse maturity date")
-
-                    fd = {
-                        'bank_name': str(row['Bank Name']).strip(),
-                        'investment_amount': float(row['Investment Amount']),
-                        'investment_date': investment_date,
-                        'interest_rate': float(row['Interest Rate']),
-                        'maturity_date': maturity_date
+                deposits.append(
+                    {
+                        'bank_name': bank_name,
+                        'investment_amount': principal,
+                        'investment_date': invested_on,
+                        'interest_rate': rate,
+                        'maturity_date': maturity,
+                        'deposit_id': deposit_id,
+                        'source_row': int(index) + 2,
                     }
-
-                    # Validate data
-                    if fd['investment_amount'] <= 0:
-                        logger.warning(f"Row {idx + 2}: Invalid investment amount ({fd['investment_amount']}), skipping")
-                        continue
-
-                    if fd['interest_rate'] <= 0 or fd['interest_rate'] > 100:
-                        logger.warning(f"Row {idx + 2}: Invalid interest rate ({fd['interest_rate']}), skipping")
-                        continue
-
-                    fds.append(fd)
-
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Row {idx + 2}: Error parsing data - {str(e)}, skipping")
-                    continue
-
-            if not fds:
-                raise ValueError("No valid FD records found in file. Please check the data format.")
-
-            logger.info(f"Parsed {len(fds)} FD records from Excel file")
-            return fds
-
-        except Exception as e:
-            logger.error(f"Failed to parse Excel file: {str(e)}")
-            raise Exception(f"Failed to parse Excel file: {str(e)}")
-
-    def create_fd_holdings(self, account_id, parsed_fds):
-        """
-        Create FD holdings in database with calculated returns.
-
-        Args:
-            account_id: Account ID to associate FDs with
-            parsed_fds: List of parsed FD dictionaries
-
-        Returns:
-            list: Created Holding objects
-
-        Raises:
-            Exception: If database operation fails
-        """
-        try:
-            # Create new snapshot
-            snapshot = Snapshot(
-                account_id=account_id,
-                snapshot_date=datetime.utcnow()
-            )
-            db.session.add(snapshot)
-            db.session.flush()  # Get snapshot ID
-
-            # Create FD holdings
-            created_holdings = []
-            for fd_data in parsed_fds:
-                # Calculate current returns
-                returns = self.calculate_fd_returns(
-                    investment_amount=fd_data['investment_amount'],
-                    investment_date=fd_data['investment_date'],
-                    interest_rate=fd_data['interest_rate'],
-                    maturity_date=fd_data.get('maturity_date')
                 )
+            except (ValueError, TypeError) as error:
+                errors.append(f'Row {row_number}: {error}')
 
-                # Create holding record
-                holding = Holding(
-                    account_id=account_id,
+        if errors:
+            suffix = f' ({len(errors)} invalid rows)' if len(errors) > 1 else ''
+            raise ValueError(f'Workbook validation failed{suffix}: {errors[0]}')
+
+        if not deposits:
+            raise ValueError('The spreadsheet contains no fixed deposits')
+        return deposits
+
+    @staticmethod
+    def _holding_key(data):
+        external_id = data.get('deposit_id')
+        if external_id:
+            return f"fd:{external_id}"[:255]
+        maturity = data.get('maturity_date')
+        return (
+            f"fd:{data['bank_name']}:{data['investment_date']}:"
+            f"{maturity or 'open'}:{data.get('source_row', 0)}"
+        )[:255]
+
+    def create_fd_holdings(self, account, parsed_fds):
+        now = datetime.utcnow()
+        snapshot = PortfolioService.create_account_snapshot(
+            account,
+            trigger='fd_upload',
+            snapshot_date=now,
+            exclude_types=('fd',),
+        )
+        created = []
+        for data in parsed_fds:
+            returns = self.calculate_fd_returns(
+                data['investment_amount'],
+                data['investment_date'],
+                data['interest_rate'],
+                data.get('maturity_date'),
+            )
+            principal = data['investment_amount']
+            current_value = _decimal(returns['current_value'])
+            interest = _decimal(returns['interest_earned'])
+            holding = Holding(
+                account_id=account.id,
+                snapshot_id=snapshot.id,
+                holding_key=self._holding_key(data),
+                tradingsymbol=data['bank_name'][:100],
+                exchange='FD',
+                instrument_type='fd',
+                market='IN',
+                currency='INR',
+                quantity=1,
+                average_price=principal,
+                last_price=current_value,
+                last_price_date=date.fromisoformat(returns['valuation_date']),
+                current_value=current_value,
+                pnl=interest,
+                pnl_percentage=interest / principal * 100 if principal else 0,
+                day_change=0,
+                day_change_percentage=0,
+                purchase_date=data['investment_date'],
+                maturity_date=data.get('maturity_date'),
+                interest_rate=data['interest_rate'],
+                sector='Fixed Deposit',
+                source='upload_fd',
+                valued_at=now,
+            )
+            db.session.add(holding)
+            created.append(holding)
+
+        PortfolioService.finalize_snapshot(snapshot)
+        db.session.commit()
+        return created
+
+    def refresh_fd_values(self, account):
+        previous = (
+            Snapshot.query.filter_by(account_id=account.id, status='completed')
+            .order_by(Snapshot.snapshot_date.desc())
+            .first()
+        )
+        deposits = (
+            [holding for holding in previous.holdings if holding.instrument_type == 'fd']
+            if previous
+            else []
+        )
+        if not deposits:
+            return 0
+
+        now = datetime.utcnow()
+        snapshot = PortfolioService.create_account_snapshot(
+            account,
+            trigger='fd_refresh',
+            snapshot_date=now,
+            exclude_types=('fd',),
+        )
+        for old in deposits:
+            returns = self.calculate_fd_returns(
+                old.average_price,
+                old.purchase_date,
+                old.interest_rate,
+                old.maturity_date,
+            )
+            principal = _decimal(old.average_price)
+            current_value = _decimal(returns['current_value'])
+            interest = _decimal(returns['interest_earned'])
+            db.session.add(
+                Holding(
+                    account_id=account.id,
                     snapshot_id=snapshot.id,
-                    tradingsymbol=fd_data['bank_name'],  # Use bank name as symbol
+                    holding_key=old.holding_key,
+                    tradingsymbol=old.tradingsymbol,
                     exchange='FD',
                     instrument_type='fd',
                     market='IN',
-                    quantity=1,  # FDs are single units
-                    average_price=fd_data['investment_amount'],
-                    last_price=returns['current_value'],  # Current value
-                    current_value=returns['current_value'],
-                    pnl=returns['interest_earned'],  # Interest earned is P&L
-                    pnl_percentage=(returns['interest_earned'] / fd_data['investment_amount'] * 100) if fd_data['investment_amount'] > 0 else 0,
-                    day_change=0,  # FDs don't have day-to-day changes
+                    currency='INR',
+                    quantity=1,
+                    average_price=principal,
+                    last_price=current_value,
+                    last_price_date=date.fromisoformat(returns['valuation_date']),
+                    current_value=current_value,
+                    pnl=interest,
+                    pnl_percentage=interest / principal * 100 if principal else 0,
+                    day_change=0,
                     day_change_percentage=0,
-                    purchase_date=fd_data['investment_date'],
-                    sector=f"{fd_data['interest_rate']}% p.a."  # Store interest rate in sector field
+                    purchase_date=old.purchase_date,
+                    maturity_date=old.maturity_date,
+                    interest_rate=old.interest_rate,
+                    sector='Fixed Deposit',
+                    source=old.source,
+                    valued_at=now,
                 )
-                db.session.add(holding)
-                created_holdings.append(holding)
+            )
 
-            db.session.commit()
-            logger.info(f"Created {len(created_holdings)} FD holdings in database")
-            return created_holdings
-
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Failed to create FD holdings: {str(e)}")
-            raise Exception(f"Failed to create FD holdings: {str(e)}")
-
-    def refresh_fd_values(self, account_id=None):
-        """
-        Recalculate interest for existing FD holdings.
-
-        Args:
-            account_id: Optional account ID to filter FDs
-
-        Returns:
-            int: Number of FDs updated
-        """
-        try:
-            # Get latest snapshot for FD holdings
-            query = Holding.query.filter_by(instrument_type='fd')
-            if account_id:
-                query = query.filter_by(account_id=account_id)
-
-            # Get latest snapshot
-            latest_snapshot = Snapshot.query.order_by(Snapshot.snapshot_date.desc()).first()
-            if latest_snapshot:
-                query = query.filter_by(snapshot_id=latest_snapshot.id)
-
-            fd_holdings = query.all()
-
-            if not fd_holdings:
-                return 0
-
-            updated_count = 0
-            for holding in fd_holdings:
-                # Extract interest rate from sector field
-                try:
-                    interest_rate = float(holding.sector.replace('% p.a.', ''))
-                except:
-                    logger.warning(f"Could not parse interest rate for {holding.tradingsymbol}")
-                    continue
-
-                # Recalculate returns
-                returns = self.calculate_fd_returns(
-                    investment_amount=holding.average_price,
-                    investment_date=holding.purchase_date,
-                    interest_rate=interest_rate
-                )
-
-                # Update holding
-                holding.last_price = returns['current_value']
-                holding.current_value = returns['current_value']
-                holding.pnl = returns['interest_earned']
-                holding.pnl_percentage = (returns['interest_earned'] / holding.average_price * 100) if holding.average_price > 0 else 0
-
-                updated_count += 1
-
-            db.session.commit()
-            logger.info(f"Updated {updated_count} FD holdings")
-            return updated_count
-
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Failed to refresh FD values: {str(e)}")
-            raise Exception(f"Failed to refresh FD values: {str(e)}")
+        PortfolioService.finalize_snapshot(snapshot)
+        db.session.commit()
+        return len(deposits)

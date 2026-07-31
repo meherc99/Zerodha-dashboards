@@ -32,6 +32,10 @@ const props = defineProps({
   horizontal: {
     type: Boolean,
     default: false
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
@@ -40,12 +44,18 @@ const chartData = computed(() => ({
   datasets: [{
     label: props.data.label || 'Value',
     data: props.data.values || [],
-    backgroundColor: props.data.colors || '#36A2EB',
-    borderRadius: 4,
+    backgroundColor: props.data.colors || '#4f7df3',
+    borderRadius: 6,
   }]
 }))
 
-const chartOptions = {
+const moneyFormatter = computed(() => new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: props.currency,
+  maximumFractionDigits: 0
+}))
+
+const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   indexAxis: props.horizontal ? 'y' : 'x',
@@ -64,26 +74,35 @@ const chartOptions = {
     tooltip: {
       callbacks: {
         label: (context) => {
-          const value = context.parsed.y || context.parsed.x
-          return `₹${value.toLocaleString('en-IN')}`
+          return moneyFormatter.value.format(Number(context.raw || 0))
         }
       }
     }
   },
-  scales: {
-    x: {
-      grid: {
-        display: false
+  scales: props.horizontal
+    ? {
+        x: {
+          beginAtZero: true,
+          grid: { color: 'rgba(203, 213, 225, 0.35)' },
+          ticks: { callback: value => moneyFormatter.value.format(value) }
+        },
+        y: {
+          grid: { display: false },
+          ticks: { color: '#5f6f82' }
+        }
       }
-    },
-    y: {
-      beginAtZero: true,
-      ticks: {
-        callback: (value) => `₹${value.toLocaleString('en-IN')}`
+    : {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#5f6f82' }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(203, 213, 225, 0.35)' },
+          ticks: { callback: value => moneyFormatter.value.format(value) }
+        }
       }
-    }
-  }
-}
+}))
 </script>
 
 <style scoped>

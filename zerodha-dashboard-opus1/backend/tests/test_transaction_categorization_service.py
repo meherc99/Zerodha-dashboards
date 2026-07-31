@@ -2,8 +2,10 @@
 Tests for transaction categorization service.
 """
 import pytest
+from datetime import date
 from decimal import Decimal
 from app.services.transaction_categorization_service import TransactionCategorizationService
+from app.models.transaction import Transaction
 from app.models.transaction_category import TransactionCategory
 from app.database import db
 
@@ -90,7 +92,7 @@ class TestTransactionCategorizationService:
             )
 
             assert category_id is not None
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             assert category.name == 'Groceries'
             assert confidence == 0.8
 
@@ -104,7 +106,7 @@ class TestTransactionCategorizationService:
                 description, amount
             )
 
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             assert category.name == 'Restaurants'
             assert confidence == 0.8
 
@@ -118,7 +120,7 @@ class TestTransactionCategorizationService:
                 description, amount
             )
 
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             assert category.name == 'Transport'
             assert confidence == 0.8
 
@@ -132,7 +134,7 @@ class TestTransactionCategorizationService:
                 description, amount
             )
 
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             assert category.name == 'Salary'
             assert confidence == 0.8
 
@@ -146,7 +148,7 @@ class TestTransactionCategorizationService:
                 description, amount
             )
 
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             assert category.name == 'Bills & Utilities'
             assert confidence == 0.8
 
@@ -160,7 +162,7 @@ class TestTransactionCategorizationService:
                 description, amount
             )
 
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             assert category.name == 'ATM Withdrawal'
             assert confidence == 0.8
 
@@ -174,7 +176,7 @@ class TestTransactionCategorizationService:
                 description, amount
             )
 
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             assert category.name == 'Uncategorized'
             assert confidence == 0.5
 
@@ -193,7 +195,7 @@ class TestTransactionCategorizationService:
                 category_id, confidence = TransactionCategorizationService.auto_categorize(
                     desc, Decimal('100.00')
                 )
-                category = TransactionCategory.query.get(category_id)
+                category = db.session.get(TransactionCategory, category_id)
                 assert category.name == 'Groceries'
                 assert confidence == 0.8
 
@@ -207,7 +209,7 @@ class TestTransactionCategorizationService:
                 description, amount
             )
 
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             assert category.name == 'Restaurants'
             assert confidence == 0.8
 
@@ -244,22 +246,34 @@ class TestTransactionCategorizationService:
             # Check first transaction (Salary)
             assert 'category_id' in categorized[0]
             assert 'category_confidence' in categorized[0]
-            cat1 = TransactionCategory.query.get(categorized[0]['category_id'])
+            cat1 = db.session.get(
+                TransactionCategory,
+                categorized[0]['category_id'],
+            )
             assert cat1.name == 'Salary'
             assert categorized[0]['category_confidence'] == 0.8
 
             # Check second transaction (ATM)
-            cat2 = TransactionCategory.query.get(categorized[1]['category_id'])
+            cat2 = db.session.get(
+                TransactionCategory,
+                categorized[1]['category_id'],
+            )
             assert cat2.name == 'ATM Withdrawal'
             assert categorized[1]['category_confidence'] == 0.8
 
             # Check third transaction (Restaurant)
-            cat3 = TransactionCategory.query.get(categorized[2]['category_id'])
+            cat3 = db.session.get(
+                TransactionCategory,
+                categorized[2]['category_id'],
+            )
             assert cat3.name == 'Restaurants'
             assert categorized[2]['category_confidence'] == 0.8
 
             # Check fourth transaction (Uncategorized)
-            cat4 = TransactionCategory.query.get(categorized[3]['category_id'])
+            cat4 = db.session.get(
+                TransactionCategory,
+                categorized[3]['category_id'],
+            )
             assert cat4.name == 'Uncategorized'
             assert categorized[3]['category_confidence'] == 0.5
 
@@ -282,7 +296,67 @@ class TestTransactionCategorizationService:
                 description, amount
             )
 
-            category = TransactionCategory.query.get(category_id)
+            category = db.session.get(TransactionCategory, category_id)
             # This will match Transport because "uber" appears in Transport keywords
             assert category.name == 'Transport'
             assert confidence == 0.8
+
+    def test_user_correction_stays_within_one_bank_account_and_does_not_learn_keywords(
+        self,
+        app,
+        sample_categories,
+        sample_bank_account,
+        other_user_bank_account,
+    ):
+        """Private merchant terms cannot become global categorization rules."""
+        with app.app_context():
+            groceries = next(
+                category
+                for category in sample_categories
+                if category.name == 'Groceries'
+            )
+            uncategorized = next(
+                category
+                for category in sample_categories
+                if category.name == 'Uncategorized'
+            )
+            original_keywords = list(groceries.keywords)
+            source = Transaction(
+                bank_account_id=sample_bank_account['id'],
+                transaction_date=date.today(),
+                description='UPI PRIVATEHEALTH MERCHANT REFERENCE',
+                amount=Decimal('400'),
+                transaction_type='debit',
+                category_id=groceries.id,
+                verified=True,
+            )
+            local_similar = Transaction(
+                bank_account_id=sample_bank_account['id'],
+                transaction_date=date.today(),
+                description='PRIVATEHEALTH MONTHLY PAYMENT',
+                amount=Decimal('450'),
+                transaction_type='debit',
+                category_id=uncategorized.id,
+                verified=False,
+            )
+            foreign_similar = Transaction(
+                bank_account_id=other_user_bank_account['id'],
+                transaction_date=date.today(),
+                description='PRIVATEHEALTH MONTHLY PAYMENT',
+                amount=Decimal('500'),
+                transaction_type='debit',
+                category_id=uncategorized.id,
+                verified=False,
+            )
+            db.session.add_all([source, local_similar, foreign_similar])
+            db.session.commit()
+
+            TransactionCategorizationService.learn_from_user_correction(
+                source.id,
+                groceries.id,
+            )
+
+            assert local_similar.category_id == groceries.id
+            assert foreign_similar.category_id == uncategorized.id
+            assert groceries.keywords == original_keywords
+            assert 'privatehealth' not in groceries.keywords

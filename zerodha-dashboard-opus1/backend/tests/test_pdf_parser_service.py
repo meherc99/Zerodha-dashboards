@@ -163,6 +163,174 @@ class TestPDFParserService:
             result = PDFParserService.identify_transaction_table(tables)
             assert result is None
 
+    def test_identify_transaction_tables_preserves_page_order(self, app):
+        """All compatible page tables are returned in extraction order."""
+        with app.app_context():
+            headers = ['Date', 'Description', 'Debit', 'Credit', 'Balance']
+            first_page = [
+                headers,
+                ['01/01/2024', 'Salary', '', '1000', '1000'],
+            ]
+            account_summary = [
+                ['Label', 'Value', 'Other'],
+                ['Opening', '0', ''],
+            ]
+            second_page = [
+                headers,
+                ['02/01/2024', 'Groceries', '100', '', '900'],
+            ]
+
+            result = PDFParserService.identify_transaction_tables([
+                account_summary,
+                first_page,
+                second_page,
+            ])
+
+            assert result == [first_page, second_page]
+
+    def test_extract_with_pdfplumber_combines_tables_and_skips_headers(
+        self,
+        app,
+        monkeypatch,
+    ):
+        """Multi-page rows are parsed once in order, without repeated headers."""
+        with app.app_context():
+            headers = ['Date', 'Description', 'Debit', 'Credit', 'Balance']
+            first_page = [
+                headers,
+                ['01/01/2024', 'Salary', '', '1000', '1000'],
+                ['02/01/2024', 'Groceries', '100', '', '900'],
+            ]
+            second_page = [
+                headers,
+                ['03/01/2024', 'Refund', '', '50', '950'],
+                headers,
+                ['04/01/2024', 'Transport', '25', '', '925'],
+            ]
+            monkeypatch.setattr(
+                PDFParserService,
+                'extract_tables_from_pdf',
+                staticmethod(lambda _path: [first_page, second_page]),
+            )
+
+            parsed_rows = []
+            original_parse = PDFParserService.parse_transaction_row
+
+            def parse_once(row, table_headers):
+                parsed_rows.append(row)
+                return original_parse(row, table_headers)
+
+            monkeypatch.setattr(
+                PDFParserService,
+                'parse_transaction_row',
+                staticmethod(parse_once),
+            )
+
+            transactions, confidence = PDFParserService.extract_with_pdfplumber(
+                'two-page-statement.pdf'
+            )
+
+            assert [txn['description'] for txn in transactions] == [
+                'Salary',
+                'Groceries',
+                'Refund',
+                'Transport',
+            ]
+            assert len(parsed_rows) == 4
+            assert all(row != headers for row in parsed_rows)
+            assert confidence == 0.8
+
+    def test_extract_with_pdfplumber_reads_every_pdf_page(
+        self,
+        app,
+        monkeypatch,
+    ):
+        """The standard parser must retain transactions from every PDF page."""
+        with app.app_context():
+            headers = ['Date', 'Description', 'Debit', 'Credit', 'Balance']
+
+            class MockPage:
+                def __init__(self, tables):
+                    self.tables = tables
+
+                def extract_tables(self):
+                    return self.tables
+
+            class MockPDF:
+                pages = [
+                    MockPage([
+                        [
+                            headers,
+                            ['01/01/2024', 'Salary', '', '1000', '1000'],
+                        ],
+                    ]),
+                    MockPage([
+                        [
+                            ['Label', 'Value', 'Other'],
+                            ['Closing balance', '900', ''],
+                        ],
+                        [
+                            headers,
+                            ['02/01/2024', 'Groceries', '100', '', '900'],
+                        ],
+                    ]),
+                ]
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    pass
+
+            monkeypatch.setattr(
+                pdfplumber,
+                'open',
+                lambda *_args, **_kwargs: MockPDF(),
+            )
+
+            transactions, confidence = PDFParserService.extract_with_pdfplumber(
+                'two-page-statement.pdf'
+            )
+
+            assert [txn['description'] for txn in transactions] == [
+                'Salary',
+                'Groceries',
+            ]
+            assert confidence == 0.8
+
+    def test_extract_with_pdfplumber_accepts_headerless_page_continuation(
+        self,
+        app,
+        monkeypatch,
+    ):
+        """A continuation page may safely inherit the first page's headers."""
+        with app.app_context():
+            headers = ['Date', 'Description', 'Debit', 'Credit', 'Balance']
+            first_page = [
+                headers,
+                ['01/01/2024', 'Salary', '', '1000', '1000'],
+            ]
+            second_page = [
+                ['02/01/2024', 'Groceries', '100', '', '900'],
+                ['03/01/2024', 'Refund', '', '50', '950'],
+            ]
+            monkeypatch.setattr(
+                PDFParserService,
+                'extract_tables_from_pdf',
+                staticmethod(lambda _path: [first_page, second_page]),
+            )
+
+            transactions, confidence = PDFParserService.extract_with_pdfplumber(
+                'headerless-continuation.pdf'
+            )
+
+            assert [txn['description'] for txn in transactions] == [
+                'Salary',
+                'Groceries',
+                'Refund',
+            ]
+            assert confidence == 0.8
+
     def test_parse_transaction_row_debit_credit_columns(self, app):
         """Test parsing a transaction row with separate debit/credit columns"""
         with app.app_context():
@@ -192,6 +360,30 @@ class TestPDFParserService:
             assert transaction['amount'] == Decimal('50000')
             assert transaction['transaction_type'] == 'credit'
             assert transaction['balance'] == Decimal('95000')
+
+    def test_parse_transaction_row_parses_date_once(self, app, monkeypatch):
+        """A row's date should not be parsed redundantly."""
+        with app.app_context():
+            parse_calls = []
+            original_parse_date = PDFParserService._parse_date
+
+            def count_parse(date_value):
+                parse_calls.append(date_value)
+                return original_parse_date(date_value)
+
+            monkeypatch.setattr(
+                PDFParserService,
+                '_parse_date',
+                staticmethod(count_parse),
+            )
+
+            transaction = PDFParserService.parse_transaction_row(
+                ['05/01/2024', 'Salary Credit', '', '50000', '95000'],
+                ['Date', 'Description', 'Debit', 'Credit', 'Balance'],
+            )
+
+            assert transaction is not None
+            assert parse_calls == ['05/01/2024']
 
     def test_parse_transaction_row_invalid_date(self, app):
         """Test parsing row with invalid date returns None"""
@@ -306,7 +498,10 @@ class TestPDFParserService:
             assert result['is_valid'] is True
 
             # Check that statement status was updated (re-query from database)
-            updated_statement = BankStatement.query.get(sample_hdfc_statement.id)
+            updated_statement = db.session.get(
+                BankStatement,
+                sample_hdfc_statement.id,
+            )
             assert updated_statement.status == 'review'
             assert updated_statement.parsed_data is not None
 
@@ -336,7 +531,10 @@ class TestPDFParserService:
                 PDFParserService.parse_statement(sample_hdfc_statement.id)
 
             # Check that statement status was updated to failed (re-query from database)
-            updated_statement = BankStatement.query.get(sample_hdfc_statement.id)
+            updated_statement = db.session.get(
+                BankStatement,
+                sample_hdfc_statement.id,
+            )
             assert updated_statement.status == 'failed'
 
     def test_parse_statement_invalid_statement_id(self, app):

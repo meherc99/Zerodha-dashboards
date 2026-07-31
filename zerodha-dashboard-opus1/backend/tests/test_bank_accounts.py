@@ -28,7 +28,7 @@ class TestCreateBankAccount:
         data = json.loads(response.data)
 
         assert data['bank_name'] == 'State Bank of India'
-        assert data['account_number'] == '11223344556677'
+        assert data['account_number'] == '****6677'
         assert data['account_type'] == 'savings'
         assert float(data['current_balance']) == 25000.50
         assert data['currency'] == 'INR'
@@ -57,7 +57,7 @@ class TestCreateBankAccount:
         data = json.loads(response.data)
 
         assert data['bank_name'] == 'Axis Bank'
-        assert data['account_number'] == '9988776655'
+        assert data['account_number'] == '****6655'
         assert data['account_type'] == 'savings'  # Default value
         assert float(data['current_balance']) == 0.0  # Default value
         assert data['currency'] == 'INR'  # Default value
@@ -99,6 +99,55 @@ class TestCreateBankAccount:
 
         assert response.status_code == 401
 
+    @pytest.mark.parametrize(
+        ('field', 'value'),
+        [
+            ('current_balance', 'not-a-number'),
+            ('current_balance', 'NaN'),
+            ('currency', 'BTC'),
+            ('account_type', 'brokerage'),
+        ],
+    )
+    def test_create_bank_account_rejects_invalid_financial_fields(
+        self,
+        client,
+        auth_headers,
+        field,
+        value,
+    ):
+        payload = {
+            'bank_name': 'HDFC Bank',
+            'account_number': '1234567890',
+            field: value,
+        }
+
+        response = client.post(
+            '/api/bank-accounts',
+            json=payload,
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+
+    def test_create_bank_account_rejects_unknown_fields(
+        self,
+        client,
+        auth_headers,
+    ):
+        response = client.post(
+            '/api/bank-accounts',
+            json={
+                'bank_name': 'HDFC Bank',
+                'account_number': '1234567890',
+                'user_id': 999,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['error'] == 'Unsupported field: user_id'
+
 
 class TestListBankAccounts:
     """Tests for GET /api/bank-accounts endpoint"""
@@ -117,7 +166,7 @@ class TestListBankAccounts:
         account = next((a for a in data if a['id'] == sample_bank_account['id']), None)
         assert account is not None
         assert account['bank_name'] == 'HDFC Bank'
-        assert account['account_number'] == '1234567890'
+        assert account['account_number'] == '****7890'
 
     def test_list_only_user_accounts(self, client, auth_headers, sample_bank_account,
                                      other_user_bank_account):
@@ -175,7 +224,7 @@ class TestGetBankAccount:
 
         assert data['id'] == sample_bank_account['id']
         assert data['bank_name'] == 'HDFC Bank'
-        assert data['account_number'] == '1234567890'
+        assert data['account_number'] == '****7890'
         assert data['account_type'] == 'savings'
 
     def test_get_bank_account_not_found(self, client, auth_headers):
@@ -221,12 +270,12 @@ class TestUpdateBankAccount:
         data = json.loads(response.data)
 
         assert data['bank_name'] == 'HDFC Bank - Updated'
-        assert data['account_number'] == '9999999999'
+        assert data['account_number'] == '****9999'
         assert data['account_type'] == 'current'
 
         # Verify in database
         with app.app_context():
-            account = BankAccount.query.get(sample_bank_account['id'])
+            account = db.session.get(BankAccount, sample_bank_account['id'])
             assert account.bank_name == 'HDFC Bank - Updated'
             assert account.account_number == '9999999999'
             assert account.account_type == 'current'
@@ -244,7 +293,7 @@ class TestUpdateBankAccount:
         data = json.loads(response.data)
 
         assert data['bank_name'] == 'New Bank Name'
-        assert data['account_number'] == '1234567890'  # Unchanged
+        assert data['account_number'] == '****7890'  # Unchanged
 
     def test_update_bank_account_not_found(self, client, auth_headers):
         """Test updating non-existent account returns 404"""
@@ -279,13 +328,35 @@ class TestUpdateBankAccount:
 
         assert response.status_code == 401
 
+    def test_update_bank_account_rejects_balance_mutation(
+        self,
+        client,
+        auth_headers,
+        sample_bank_account,
+    ):
+        response = client.put(
+            f'/api/bank-accounts/{sample_bank_account["id"]}',
+            json={'current_balance': 1_000_000},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()['error'] == (
+            'Unsupported field: current_balance'
+        )
+
 
 class TestDeleteBankAccount:
     """Tests for DELETE /api/bank-accounts/:id endpoint"""
 
-    def test_delete_bank_account_soft_delete(self, client, auth_headers,
-                                              sample_bank_account, app):
-        """Test soft delete (sets is_active=False)"""
+    def test_delete_bank_account_permanently_erases_record(
+        self,
+        client,
+        auth_headers,
+        sample_bank_account,
+        app,
+    ):
+        """Deletion erases the account instead of hiding sensitive data."""
         response = client.delete(f'/api/bank-accounts/{sample_bank_account["id"]}',
                                 headers=auth_headers)
 
@@ -293,11 +364,10 @@ class TestDeleteBankAccount:
         data = json.loads(response.data)
         assert 'message' in data
 
-        # Verify account still exists but is inactive
+        # The account and its cascade-owned financial rows are gone.
         with app.app_context():
-            account = BankAccount.query.get(sample_bank_account['id'])
-            assert account is not None
-            assert account.is_active is False
+            account = db.session.get(BankAccount, sample_bank_account['id'])
+            assert account is None
 
     def test_delete_bank_account_not_in_list(self, client, auth_headers,
                                               sample_bank_account):

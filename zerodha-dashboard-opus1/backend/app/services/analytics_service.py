@@ -3,8 +3,9 @@ Analytics service for advanced calculations and metrics.
 """
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
+from sqlalchemy import and_, func
 from app.database import db
-from app.models import PortfolioTimeseries, Holding, HistoricalPrice
+from app.models import Account, PortfolioTimeseries, Holding, HistoricalPrice
 import pandas as pd
 import numpy as np
 import logging
@@ -17,10 +18,12 @@ class AnalyticsService:
 
     @staticmethod
     def get_portfolio_history(
+        user_id: int,
         account_id: Optional[int] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
-        granularity: str = 'daily'
+        granularity: str = 'daily',
+        currency: Optional[str] = None,
     ) -> List[Dict]:
         """
         Get historical portfolio value data.
@@ -39,38 +42,148 @@ class AnalyticsService:
         if start_date is None:
             start_date = end_date - timedelta(days=30)
 
-        query = db.session.query(PortfolioTimeseries).filter(
-            PortfolioTimeseries.date >= start_date,
-            PortfolioTimeseries.date <= end_date
+        scoped = (
+            db.session.query(PortfolioTimeseries)
+            .join(Account, Account.id == PortfolioTimeseries.account_id)
+            .filter(
+                Account.user_id == user_id,
+                Account.is_active.is_(True),
+            )
         )
 
         if account_id:
-            query = query.filter(PortfolioTimeseries.account_id == account_id)
+            scoped = scoped.filter(PortfolioTimeseries.account_id == account_id)
+        if currency:
+            scoped = scoped.filter(PortfolioTimeseries.currency == currency)
 
-        query = query.order_by(PortfolioTimeseries.date.asc())
-        timeseries = query.all()
+        baseline_dates = (
+            db.session.query(
+                PortfolioTimeseries.account_id.label('account_id'),
+                PortfolioTimeseries.currency.label('currency'),
+                func.max(PortfolioTimeseries.date).label('date'),
+            )
+            .join(Account, Account.id == PortfolioTimeseries.account_id)
+            .filter(
+                Account.user_id == user_id,
+                Account.is_active.is_(True),
+                PortfolioTimeseries.date < start_date,
+            )
+        )
+        if account_id:
+            baseline_dates = baseline_dates.filter(
+                PortfolioTimeseries.account_id == account_id
+            )
+        if currency:
+            baseline_dates = baseline_dates.filter(
+                PortfolioTimeseries.currency == currency
+            )
+        baseline_dates = baseline_dates.group_by(
+            PortfolioTimeseries.account_id,
+            PortfolioTimeseries.currency,
+        ).subquery()
 
-        # Group by account if needed
-        if not account_id:
-            # Aggregate across accounts for each date
-            df = pd.DataFrame([t.to_dict() for t in timeseries])
-            if not df.empty:
-                grouped = df.groupby('date').agg({
-                    'total_value': 'sum',
-                    'invested_value': 'sum',
-                    'pnl': 'sum',
-                    'day_change': 'sum',
-                    'holdings_count': 'sum'
-                }).reset_index()
+        baseline = (
+            db.session.query(PortfolioTimeseries)
+            .join(
+                baseline_dates,
+                and_(
+                    PortfolioTimeseries.account_id
+                    == baseline_dates.c.account_id,
+                    PortfolioTimeseries.currency
+                    == baseline_dates.c.currency,
+                    PortfolioTimeseries.date == baseline_dates.c.date,
+                ),
+            )
+            .all()
+        )
+        events = (
+            scoped.filter(
+                PortfolioTimeseries.date >= start_date,
+                PortfolioTimeseries.date <= end_date,
+            )
+            .order_by(PortfolioTimeseries.date.asc())
+            .all()
+        )
 
-                # Recalculate pnl_percentage
-                grouped['pnl_percentage'] = (
-                    grouped['pnl'] / grouped['invested_value'] * 100
-                ).fillna(0)
+        state = {
+            (entry.account_id, entry.currency): entry
+            for entry in baseline
+        }
+        def period_for(value):
+            if granularity == 'weekly':
+                return (
+                    value - timedelta(days=value.weekday())
+                ).replace(hour=0, minute=0, second=0, microsecond=0)
+            if granularity == 'monthly':
+                return value.replace(
+                    day=1,
+                    hour=0,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                )
+            return value.replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
 
-                return grouped.to_dict('records')
+        period_events = {
+            period_for(start_date): {},
+            period_for(end_date): {},
+        }
+        for entry in events:
+            period = period_for(entry.date)
+            period_events.setdefault(period, {})[
+                (entry.account_id, entry.currency)
+            ] = entry
 
-        return [t.to_dict() for t in timeseries]
+        records = []
+        for period in sorted(period_events):
+            updates = period_events[period]
+            state.update(updates)
+            currencies = sorted({key[1] for key in state})
+            for code in currencies:
+                entries = [
+                    (key, entry)
+                    for key, entry in state.items()
+                    if key[1] == code
+                ]
+                invested = sum(float(entry.invested_value) for _, entry in entries)
+                pnl = sum(float(entry.pnl or 0) for _, entry in entries)
+                records.append(
+                    {
+                        'date': period.isoformat(),
+                        'currency': code,
+                        'total_value': round(
+                            sum(float(entry.total_value) for _, entry in entries),
+                            2,
+                        ),
+                        'invested_value': round(invested, 2),
+                        'pnl': round(pnl, 2),
+                        'pnl_percentage': round(
+                            pnl / invested * 100 if invested else 0,
+                            2,
+                        ),
+                        # A carried-forward account has no trustworthy current
+                        # day movement for this event period.
+                        'day_change': round(
+                            sum(
+                                float(entry.day_change or 0)
+                                for key, entry in entries
+                                if key in updates
+                            ),
+                            2,
+                        ),
+                        'holdings_count': sum(
+                            int(entry.holdings_count or 0)
+                            for _, entry in entries
+                        ),
+                        'accounts_count': len(entries),
+                    }
+                )
+        return records
 
     @staticmethod
     def calculate_returns(timeseries_data: List[Dict]) -> Dict:
@@ -85,9 +198,10 @@ class AnalyticsService:
         """
         if not timeseries_data or len(timeseries_data) < 2:
             return {
-                'total_return': 0,
-                'annualized_return': 0,
-                'day_return': 0
+                'value_growth_percentage': 0,
+                'annualized_value_growth_percentage': 0,
+                'latest_day_change': 0,
+                'cash_flow_adjusted': False,
             }
 
         df = pd.DataFrame(timeseries_data)
@@ -110,9 +224,13 @@ class AnalyticsService:
         day_return = df.iloc[-1].get('day_change', 0)
 
         return {
-            'total_return': round(total_return, 2),
-            'annualized_return': round(annualized_return, 2),
-            'day_return': round(day_return, 2)
+            'value_growth_percentage': round(total_return, 2),
+            'annualized_value_growth_percentage': round(
+                annualized_return,
+                2,
+            ),
+            'latest_day_change': round(day_return, 2),
+            'cash_flow_adjusted': False,
         }
 
     @staticmethod
@@ -128,9 +246,10 @@ class AnalyticsService:
         """
         if not timeseries_data or len(timeseries_data) < 2:
             return {
-                'volatility': 0,
-                'sharpe_ratio': 0,
-                'max_drawdown': 0
+                'value_change_volatility': 0,
+                'value_change_sharpe_proxy': 0,
+                'max_value_drawdown': 0,
+                'cash_flow_adjusted': False,
             }
 
         df = pd.DataFrame(timeseries_data)
@@ -142,9 +261,13 @@ class AnalyticsService:
 
         # Volatility (annualized standard deviation of returns)
         volatility = df['returns'].std() * np.sqrt(252) * 100  # Annualized
+        if pd.isna(volatility):
+            volatility = 0
 
         # Sharpe Ratio (assuming risk-free rate of 0 for simplicity)
         mean_return = df['returns'].mean() * 252  # Annualized
+        if pd.isna(mean_return):
+            mean_return = 0
         sharpe_ratio = mean_return / (volatility / 100) if volatility > 0 else 0
 
         # Max Drawdown
@@ -152,11 +275,14 @@ class AnalyticsService:
         df['running_max'] = df['cumulative'].cummax()
         df['drawdown'] = (df['cumulative'] - df['running_max']) / df['running_max'] * 100
         max_drawdown = df['drawdown'].min()
+        if pd.isna(max_drawdown):
+            max_drawdown = 0
 
         return {
-            'volatility': round(volatility, 2),
-            'sharpe_ratio': round(sharpe_ratio, 2),
-            'max_drawdown': round(max_drawdown, 2)
+            'value_change_volatility': round(volatility, 2),
+            'value_change_sharpe_proxy': round(sharpe_ratio, 2),
+            'max_value_drawdown': round(max_drawdown, 2),
+            'cash_flow_adjusted': False,
         }
 
     @staticmethod
@@ -249,8 +375,10 @@ class AnalyticsService:
 
     @staticmethod
     def get_performance_metrics(
+        user_id: int,
         account_id: Optional[int] = None,
-        period_days: int = 30
+        period_days: int = 30,
+        currency: Optional[str] = None,
     ) -> Dict:
         """
         Get comprehensive performance metrics.
@@ -267,17 +395,35 @@ class AnalyticsService:
 
         # Get timeseries data
         timeseries = AnalyticsService.get_portfolio_history(
+            user_id=user_id,
             account_id=account_id,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            currency=currency,
         )
 
-        # Calculate metrics
-        returns = AnalyticsService.calculate_returns(timeseries)
-        risk_metrics = AnalyticsService.calculate_risk_metrics(timeseries)
+        by_currency = {}
+        for code in sorted({point['currency'] for point in timeseries}):
+            points = [point for point in timeseries if point['currency'] == code]
+            by_currency[code] = {
+                'value_growth': AnalyticsService.calculate_returns(points),
+                'value_path_metrics': (
+                    AnalyticsService.calculate_risk_metrics(points)
+                ),
+            }
 
-        return {
-            'returns': returns,
-            'risk_metrics': risk_metrics,
-            'period_days': period_days
+        result = {
+            'period_days': period_days,
+            'currency': currency or (
+                next(iter(by_currency)) if len(by_currency) == 1 else 'MIXED'
+            ),
+            'by_currency': by_currency,
         }
+        if len(by_currency) == 1:
+            result.update(next(iter(by_currency.values())))
+        else:
+            result.update({
+                'value_growth': None,
+                'value_path_metrics': None,
+            })
+        return result

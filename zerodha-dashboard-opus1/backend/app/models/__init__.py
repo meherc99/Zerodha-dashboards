@@ -11,6 +11,8 @@ from app.models.transaction_category import TransactionCategory
 from app.models.bank_statement import BankStatement
 from app.models.transaction import Transaction
 from app.models.parsing_template import ParsingTemplate
+from app.models.revoked_token import RevokedToken
+from app.models.rate_limit_bucket import RateLimitBucket
 
 __all__ = [
     'Account',
@@ -24,5 +26,7 @@ __all__ = [
     'TransactionCategory',
     'BankStatement',
     'Transaction',
-    'ParsingTemplate'
+    'ParsingTemplate',
+    'RevokedToken',
+    'RateLimitBucket',
 ]

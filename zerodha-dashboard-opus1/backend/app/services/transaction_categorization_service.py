@@ -31,7 +31,10 @@ class TransactionCategorizationService:
         """
         if not description:
             # Return Uncategorized
-            uncategorized = TransactionCategory.query.filter_by(name='Uncategorized').first()
+            uncategorized = TransactionCategory.query.filter_by(
+                name='Uncategorized',
+                is_system=True,
+            ).first()
             if uncategorized:
                 return uncategorized.id, 0.5
             return None, 0.5
@@ -41,6 +44,7 @@ class TransactionCategorizationService:
 
         # Get all categories with keywords
         categories = TransactionCategory.query.filter(
+            TransactionCategory.is_system.is_(True),
             TransactionCategory.keywords.isnot(None)
         ).all()
 
@@ -56,15 +60,18 @@ class TransactionCategorizationService:
                 # Check if keyword is in description
                 if keyword_lower in description_lower:
                     logger.info(
-                        f"Matched category '{category.name}' for description '{description}' "
-                        f"using keyword '{keyword}'"
+                        "Matched transaction to category %s using a system rule",
+                        category.id,
                     )
                     return category.id, 0.8
 
         # No match found - return Uncategorized
-        uncategorized = TransactionCategory.query.filter_by(name='Uncategorized').first()
+        uncategorized = TransactionCategory.query.filter_by(
+            name='Uncategorized',
+            is_system=True,
+        ).first()
         if uncategorized:
-            logger.info(f"No category match for description '{description}', using Uncategorized")
+            logger.info("No category rule matched; using Uncategorized")
             return uncategorized.id, 0.5
 
         # Fallback if Uncategorized category doesn't exist
@@ -110,11 +117,12 @@ class TransactionCategorizationService:
     @staticmethod
     def learn_from_user_correction(transaction_id: int, new_category_id: int):
         """
-        Learn from user's category correction and update category keywords.
+        Apply a correction to similar transactions in the same bank account.
 
-        When a user changes a transaction's category, we extract meaningful
-        keywords from the description and add them to the new category.
-        We also update similar uncategorized transactions.
+        System category keywords are global configuration and must never absorb
+        words from a user's private transaction description. The correction is
+        therefore propagated only to matching unverified transactions owned by
+        the same bank account, without persisting the extracted words.
 
         Args:
             transaction_id: ID of the transaction that was recategorized
@@ -124,12 +132,15 @@ class TransactionCategorizationService:
             ValueError: If transaction or category not found
         """
         # Get transaction
-        transaction = Transaction.query.get(transaction_id)
+        transaction = db.session.get(Transaction, transaction_id)
         if not transaction:
             raise ValueError(f"Transaction not found: {transaction_id}")
 
         # Get new category
-        new_category = TransactionCategory.query.get(new_category_id)
+        new_category = TransactionCategory.query.filter_by(
+            id=new_category_id,
+            is_system=True,
+        ).first()
         if not new_category:
             raise ValueError(f"Category not found: {new_category_id}")
 
@@ -139,35 +150,14 @@ class TransactionCategorizationService:
         )
 
         if not keywords:
-            logger.info(f"No keywords extracted from '{transaction.description}'")
+            logger.info("No terms available for private category propagation")
             return
 
-        # Get existing keywords for category
-        existing_keywords = new_category.keywords or []
-
-        # Add new keywords that aren't already present
-        new_keywords_added = []
-        for keyword in keywords:
-            if keyword not in existing_keywords:
-                existing_keywords.append(keyword)
-                new_keywords_added.append(keyword)
-
-        if new_keywords_added:
-            # Update category keywords
-            new_category.keywords = existing_keywords
-            db.session.commit()
-
-            logger.info(
-                f"Added keywords {new_keywords_added} to category '{new_category.name}' "
-                f"from transaction '{transaction.description}'"
-            )
-
-            # Update similar uncategorized transactions
-            TransactionCategorizationService._update_similar_transactions(
-                transaction.bank_account_id,
-                transaction.description,
-                new_category_id
-            )
+        TransactionCategorizationService._update_similar_transactions(
+            transaction.bank_account_id,
+            transaction.description,
+            new_category_id
+        )
 
     @staticmethod
     def _extract_keywords(description: str) -> List[str]:
@@ -228,7 +218,10 @@ class TransactionCategorizationService:
             return
 
         # Get uncategorized category ID
-        uncategorized = TransactionCategory.query.filter_by(name='Uncategorized').first()
+        uncategorized = TransactionCategory.query.filter_by(
+            name='Uncategorized',
+            is_system=True,
+        ).first()
         if not uncategorized:
             return
 
@@ -255,5 +248,7 @@ class TransactionCategorizationService:
         if updated_count > 0:
             db.session.commit()
             logger.info(
-                f"Updated {updated_count} similar transactions to category {category_id}"
+                "Applied a private category correction to %s similar "
+                "transactions in one bank account",
+                updated_count,
             )

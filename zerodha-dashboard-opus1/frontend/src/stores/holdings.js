@@ -3,6 +3,24 @@
  */
 import { defineStore } from 'pinia'
 import { api } from '@/services/api'
+import { summarizeHoldings } from '@/utils/holdings'
+
+let portfolioRequestSequence = 0
+const portfolioControllers = new WeakMap()
+
+const portfolioScopeKey = accountId => {
+  return accountId === null || accountId === undefined || accountId === ''
+    ? 'family'
+    : `account:${String(accountId)}`
+}
+
+const isCanceledRequest = error => {
+  return (
+    error?.code === 'ERR_CANCELED'
+    || error?.name === 'CanceledError'
+    || error?.name === 'AbortError'
+  )
+}
 
 export const useHoldingsStore = defineStore('holdings', {
   state: () => ({
@@ -13,7 +31,10 @@ export const useHoldingsStore = defineStore('holdings', {
     performanceMetrics: null,
     loading: false,
     error: null,
+    analyticsError: null,
     lastUpdated: null,
+    portfolioScope: null,
+    portfolioRequestId: 0,
   }),
 
   getters: {
@@ -29,135 +50,27 @@ export const useHoldingsStore = defineStore('holdings', {
     fdHoldings: (state) =>
       state.holdings.filter(h => h.instrument_type === 'fd'),
 
-    equitySummary: (state) => {
-      const equity = state.holdings.filter(h => h.instrument_type === 'equity')
-      if (equity.length === 0) {
-        return {
-          current_value: 0,
-          total_pnl: 0,
-          total_pnl_percentage: 0,
-          day_change: 0,
-          total_holdings: 0,
-          total_investment: 0
-        }
-      }
+    equitySummary: (state) =>
+      summarizeHoldings(state.holdings.filter(h => h.instrument_type === 'equity')),
 
-      const totalInvestment = equity.reduce((sum, h) =>
-        sum + (h.average_price * h.quantity), 0)
-      const currentValue = equity.reduce((sum, h) =>
-        sum + h.current_value, 0)
-      const totalPnl = equity.reduce((sum, h) =>
-        sum + h.pnl, 0)
-      const dayChange = equity.reduce((sum, h) =>
-        sum + (h.day_change || 0), 0)
+    mfSummary: (state) =>
+      summarizeHoldings(state.holdings.filter(h => h.instrument_type === 'mf')),
 
-      return {
-        current_value: currentValue,
-        total_pnl: totalPnl,
-        total_pnl_percentage: totalInvestment > 0
-          ? (totalPnl / totalInvestment) * 100
-          : 0,
-        day_change: dayChange,
-        total_holdings: equity.length,
-        total_investment: totalInvestment
-      }
-    },
-
-    mfSummary: (state) => {
-      const mf = state.holdings.filter(h => h.instrument_type === 'mf')
-      if (mf.length === 0) {
-        return {
-          current_value: 0,
-          total_pnl: 0,
-          total_pnl_percentage: 0,
-          day_change: 0,
-          total_holdings: 0,
-          total_investment: 0
-        }
-      }
-
-      const totalInvestment = mf.reduce((sum, h) =>
-        sum + (h.average_price * h.quantity), 0)
-      const currentValue = mf.reduce((sum, h) =>
-        sum + h.current_value, 0)
-      const totalPnl = mf.reduce((sum, h) =>
-        sum + h.pnl, 0)
-      const dayChange = mf.reduce((sum, h) =>
-        sum + (h.day_change || 0), 0)
-
-      return {
-        current_value: currentValue,
-        total_pnl: totalPnl,
-        total_pnl_percentage: totalInvestment > 0
-          ? (totalPnl / totalInvestment) * 100
-          : 0,
-        day_change: dayChange,
-        total_holdings: mf.length,
-        total_investment: totalInvestment
-      }
-    },
-
-    usSummary: (state) => {
-      const us = state.holdings.filter(h => h.instrument_type === 'us_equity')
-      if (us.length === 0) {
-        return {
-          current_value: 0,
-          total_pnl: 0,
-          total_pnl_percentage: 0,
-          day_change: 0,
-          total_holdings: 0,
-          total_investment: 0
-        }
-      }
-
-      const totalInvestment = us.reduce((sum, h) =>
-        sum + (h.average_price * h.quantity), 0)
-      const currentValue = us.reduce((sum, h) =>
-        sum + h.current_value, 0)
-      const totalPnl = us.reduce((sum, h) =>
-        sum + h.pnl, 0)
-      const dayChange = us.reduce((sum, h) =>
-        sum + (h.day_change || 0), 0)
-
-      return {
-        current_value: currentValue,
-        total_pnl: totalPnl,
-        total_pnl_percentage: totalInvestment > 0
-          ? (totalPnl / totalInvestment) * 100
-          : 0,
-        day_change: dayChange,
-        total_holdings: us.length,
-        total_investment: totalInvestment
-      }
-    },
+    usSummary: (state) =>
+      summarizeHoldings(state.holdings.filter(h => h.instrument_type === 'us_equity')),
 
     fdSummary: (state) => {
       const fds = state.holdings.filter(h => h.instrument_type === 'fd')
-      if (fds.length === 0) {
-        return {
-          current_value: 0,
-          total_interest: 0,
-          total_interest_percentage: 0,
-          total_holdings: 0,
-          total_investment: 0
-        }
-      }
-
-      const totalInvestment = fds.reduce((sum, h) =>
-        sum + h.average_price, 0)
-      const currentValue = fds.reduce((sum, h) =>
-        sum + h.current_value, 0)
-      const totalInterest = fds.reduce((sum, h) =>
-        sum + h.pnl, 0)
-
+      const summary = summarizeHoldings(fds)
       return {
-        current_value: currentValue,
-        total_interest: totalInterest,
-        total_interest_percentage: totalInvestment > 0
-          ? (totalInterest / totalInvestment) * 100
-          : 0,
-        total_holdings: fds.length,
-        total_investment: totalInvestment
+        current_value: summary.current_value,
+        total_investment: summary.total_investment,
+        total_pnl: summary.total_pnl,
+        total_pnl_percentage: summary.total_pnl_percentage,
+        total_holdings: summary.total_holdings,
+        day_change: summary.day_change,
+        total_interest: summary.total_pnl,
+        total_interest_percentage: summary.total_pnl_percentage,
       }
     },
 
@@ -177,44 +90,143 @@ export const useHoldingsStore = defineStore('holdings', {
   },
 
   actions: {
-    async fetchHoldings(accountId = null, filters = {}) {
-      this.loading = true
+    beginPortfolioRequest(accountId = null, { clear = false } = {}) {
+      portfolioControllers.get(this)?.abort()
+
+      const controller = new AbortController()
+      const request = {
+        id: ++portfolioRequestSequence,
+        scope: portfolioScopeKey(accountId),
+        signal: controller.signal,
+      }
+      portfolioControllers.set(this, controller)
+      this.portfolioScope = request.scope
+      this.portfolioRequestId = request.id
       this.error = null
+      this.analyticsError = null
+
+      if (clear) {
+        this.holdings = []
+        this.summary = null
+        this.portfolioHistory = []
+        this.sectorBreakdown = []
+        this.performanceMetrics = null
+        this.lastUpdated = null
+      }
+
+      return request
+    },
+
+    isPortfolioRequestCurrent(request) {
+      return Boolean(
+        request
+        && !request.signal.aborted
+        && request.id === this.portfolioRequestId
+        && request.scope === this.portfolioScope
+      )
+    },
+
+    currentPortfolioRequest(accountId = null) {
+      const controller = portfolioControllers.get(this)
+      const scope = portfolioScopeKey(accountId)
+      if (
+        !controller
+        || controller.signal.aborted
+        || this.portfolioScope !== scope
+        || !this.portfolioRequestId
+      ) {
+        return this.beginPortfolioRequest(accountId)
+      }
+      return {
+        id: this.portfolioRequestId,
+        scope,
+        signal: controller.signal,
+      }
+    },
+
+    clearPortfolioData() {
+      portfolioControllers.get(this)?.abort()
+      portfolioControllers.delete(this)
+      this.portfolioRequestId = ++portfolioRequestSequence
+      this.portfolioScope = null
+      this.holdings = []
+      this.summary = null
+      this.portfolioHistory = []
+      this.sectorBreakdown = []
+      this.performanceMetrics = null
+      this.loading = false
+      this.error = null
+      this.analyticsError = null
+      this.lastUpdated = null
+    },
+
+    async fetchHoldings(accountId = null, filters = {}, scopeRequest = null) {
+      const ownsRequest = !scopeRequest
+      const request = (
+        scopeRequest || this.beginPortfolioRequest(accountId)
+      )
+      if (ownsRequest) this.loading = true
       try {
         const params = { ...filters }
         if (accountId) {
           params.account_id = accountId
         }
 
-        const response = await api.getHoldings(params)
+        const response = await api.getHoldings(params, {
+          signal: request.signal
+        })
+        if (!this.isPortfolioRequestCurrent(request)) return null
         this.holdings = response.data.holdings
         this.summary = response.data.summary
         this.lastUpdated = new Date()
+        return response.data
       } catch (error) {
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
         this.error = error.response?.data?.error || 'Failed to fetch holdings'
-        console.error('Error fetching holdings:', error)
+        throw error
       } finally {
-        this.loading = false
+        if (ownsRequest && this.isPortfolioRequestCurrent(request)) {
+          this.loading = false
+        }
       }
     },
 
-    async fetchAggregatedHoldings() {
-      this.loading = true
-      this.error = null
+    async fetchAggregatedHoldings(scopeRequest = null) {
+      const ownsRequest = !scopeRequest
+      const request = (
+        scopeRequest || this.beginPortfolioRequest(null)
+      )
+      if (ownsRequest) this.loading = true
       try {
-        const response = await api.getAggregatedHoldings()
+        const response = await api.getAggregatedHoldings({
+          signal: request.signal
+        })
+        if (!this.isPortfolioRequestCurrent(request)) return null
         this.holdings = response.data.holdings
         this.summary = response.data
         this.lastUpdated = new Date()
+        return response.data
       } catch (error) {
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
         this.error = error.response?.data?.error || 'Failed to fetch aggregated holdings'
-        console.error('Error fetching aggregated holdings:', error)
+        throw error
       } finally {
-        this.loading = false
+        if (ownsRequest && this.isPortfolioRequestCurrent(request)) {
+          this.loading = false
+        }
       }
     },
 
-    async fetchPortfolioHistory(accountId = null, days = 30) {
+    async fetchPortfolioHistory(accountId = null, days = 30, scopeRequest = null) {
+      const request = (
+        scopeRequest || this.currentPortfolioRequest(accountId)
+      )
       try {
         const endDate = new Date()
         const startDate = new Date()
@@ -224,51 +236,156 @@ export const useHoldingsStore = defineStore('holdings', {
           account_id: accountId,
           start_date: startDate.toISOString(),
           end_date: endDate.toISOString(),
+        }, {
+          signal: request.signal
         })
 
+        if (!this.isPortfolioRequestCurrent(request)) return null
         this.portfolioHistory = response.data.timeseries
+        return response.data.timeseries
       } catch (error) {
-        console.error('Error fetching portfolio history:', error)
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
+        this.portfolioHistory = []
+        throw error
       }
     },
 
-    async fetchSectorBreakdown(accountId = null) {
+    async fetchSectorBreakdown(accountId = null, scopeRequest = null) {
+      const request = (
+        scopeRequest || this.currentPortfolioRequest(accountId)
+      )
       try {
-        const response = await api.getSectorBreakdown({ account_id: accountId })
+        const response = await api.getSectorBreakdown(
+          { account_id: accountId },
+          { signal: request.signal }
+        )
+        if (!this.isPortfolioRequestCurrent(request)) return null
         this.sectorBreakdown = response.data.sectors
+        return response.data.sectors
       } catch (error) {
-        console.error('Error fetching sector breakdown:', error)
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
+        this.sectorBreakdown = []
+        throw error
       }
     },
 
-    async fetchPerformanceMetrics(accountId = null, periodDays = 30) {
+    async fetchPerformanceMetrics(accountId = null, periodDays = 30, scopeRequest = null) {
+      const request = (
+        scopeRequest || this.currentPortfolioRequest(accountId)
+      )
       try {
         const response = await api.getPerformanceMetrics({
           account_id: accountId,
           period_days: periodDays,
+        }, {
+          signal: request.signal
         })
+        if (!this.isPortfolioRequestCurrent(request)) return null
         this.performanceMetrics = response.data
+        return response.data
       } catch (error) {
-        console.error('Error fetching performance metrics:', error)
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
+        this.performanceMetrics = null
+        throw error
+      }
+    },
+
+    async loadPortfolio(accountId = null, days = 30) {
+      const request = this.beginPortfolioRequest(accountId, { clear: true })
+      this.loading = true
+
+      try {
+        const portfolio = accountId
+          ? await this.fetchHoldings(accountId, {}, request)
+          : await this.fetchAggregatedHoldings(request)
+        if (!this.isPortfolioRequestCurrent(request)) {
+          return { stale: true }
+        }
+        if (!portfolio) return { stale: true }
+
+        const analyticsResults = await Promise.allSettled([
+          this.fetchSectorBreakdown(accountId, request),
+          this.fetchPortfolioHistory(accountId, days, request)
+        ])
+        if (!this.isPortfolioRequestCurrent(request)) {
+          return { stale: true }
+        }
+
+        const analyticsFailed = analyticsResults.some(
+          result => result.status === 'rejected'
+        )
+        this.analyticsError = analyticsFailed
+          ? 'Portfolio analytics are temporarily unavailable.'
+          : null
+        return { stale: false, analyticsFailed }
+      } catch (error) {
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) {
+          return { stale: true }
+        }
+        throw error
+      } finally {
+        if (this.isPortfolioRequestCurrent(request)) {
+          this.loading = false
+        }
       }
     },
 
     async syncHoldings(accountId = null) {
+      const request = this.beginPortfolioRequest(accountId)
       this.loading = true
-      this.error = null
       try {
-        await api.syncHoldings(accountId)
-        // Refresh holdings after sync
+        const response = await api.syncHoldings(accountId, {
+          signal: request.signal
+        })
+        if (!this.isPortfolioRequestCurrent(request)) return null
+        const result = response.data
+
         if (accountId) {
-          await this.fetchHoldings(accountId)
+          await this.fetchHoldings(accountId, {}, request)
         } else {
-          await this.fetchAggregatedHoldings()
+          await this.fetchAggregatedHoldings(request)
         }
+        if (!this.isPortfolioRequestCurrent(request)) return null
+
+        if (result.status !== 'completed') {
+          const message = result.status === 'partial'
+            ? (
+                `${result.accounts_failed} of ${result.accounts_total} `
+                + 'accounts failed to sync. Showing the latest available data.'
+              )
+            : 'Portfolio sync failed. Showing the latest available data.'
+          const syncError = new Error(message)
+          syncError.syncResult = result
+          throw syncError
+        }
+        return result
       } catch (error) {
-        this.error = error.response?.data?.error || 'Failed to sync holdings'
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
+        this.error = (
+          error.syncResult
+            ? error.message
+            : error.response?.data?.error || 'Failed to sync holdings'
+        )
         throw error
       } finally {
-        this.loading = false
+        if (this.isPortfolioRequestCurrent(request)) {
+          this.loading = false
+        }
       }
     },
 
@@ -277,8 +394,6 @@ export const useHoldingsStore = defineStore('holdings', {
       this.error = null
       try {
         const response = await api.uploadUSHoldings(file, accountId)
-        // Refresh holdings after upload
-        await this.fetchHoldings(accountId)
         return response.data
       } catch (error) {
         this.error = error.response?.data?.error || 'Failed to upload file'
@@ -289,21 +404,50 @@ export const useHoldingsStore = defineStore('holdings', {
     },
 
     async refreshUSPrices(accountId = null) {
+      const request = this.beginPortfolioRequest(accountId)
       this.loading = true
-      this.error = null
       try {
-        await api.refreshUSPrices(accountId)
-        // Refresh holdings after price update
+        const response = await api.refreshUSPrices(accountId, {
+          signal: request.signal
+        })
+        if (!this.isPortfolioRequestCurrent(request)) return null
+        const result = response.data
+
         if (accountId) {
-          await this.fetchHoldings(accountId)
+          await this.fetchHoldings(accountId, {}, request)
         } else {
-          await this.fetchAggregatedHoldings()
+          await this.fetchAggregatedHoldings(request)
         }
+        if (!this.isPortfolioRequestCurrent(request)) return null
+
+        if (
+          result.status === 'failed'
+          || result.status === 'no_holdings'
+          || Number(result.updated_count || 0) === 0
+        ) {
+          const message = result.status === 'no_holdings'
+            ? 'No US holdings were available to refresh.'
+            : 'No US prices were updated.'
+          const refreshError = new Error(message)
+          refreshError.refreshResult = result
+          throw refreshError
+        }
+        return result
       } catch (error) {
-        this.error = error.response?.data?.error || 'Failed to refresh prices'
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
+        this.error = (
+          error.refreshResult
+            ? error.message
+            : error.response?.data?.error || 'Failed to refresh prices'
+        )
         throw error
       } finally {
-        this.loading = false
+        if (this.isPortfolioRequestCurrent(request)) {
+          this.loading = false
+        }
       }
     },
 
@@ -312,8 +456,6 @@ export const useHoldingsStore = defineStore('holdings', {
       this.error = null
       try {
         const response = await api.uploadFDHoldings(file, accountId)
-        // Refresh holdings after upload
-        await this.fetchHoldings(accountId)
         return response.data
       } catch (error) {
         this.error = error.response?.data?.error || 'Failed to upload file'
@@ -324,21 +466,31 @@ export const useHoldingsStore = defineStore('holdings', {
     },
 
     async refreshFDValues(accountId = null) {
+      const request = this.beginPortfolioRequest(accountId)
       this.loading = true
-      this.error = null
       try {
-        await api.refreshFDValues(accountId)
-        // Refresh holdings after value update
+        const response = await api.refreshFDValues(accountId, {
+          signal: request.signal
+        })
+        if (!this.isPortfolioRequestCurrent(request)) return null
         if (accountId) {
-          await this.fetchHoldings(accountId)
+          await this.fetchHoldings(accountId, {}, request)
         } else {
-          await this.fetchAggregatedHoldings()
+          await this.fetchAggregatedHoldings(request)
         }
+        if (!this.isPortfolioRequestCurrent(request)) return null
+        return response.data
       } catch (error) {
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
         this.error = error.response?.data?.error || 'Failed to refresh FD values'
         throw error
       } finally {
-        this.loading = false
+        if (this.isPortfolioRequestCurrent(request)) {
+          this.loading = false
+        }
       }
     },
 

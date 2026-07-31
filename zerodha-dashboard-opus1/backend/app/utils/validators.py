@@ -13,27 +13,34 @@ def validate_account_data(data):
     Returns:
         Tuple of (is_valid, error_message)
     """
-    required_fields = ['account_name', 'api_key', 'api_secret']
+    if not isinstance(data, dict):
+        return False, "Invalid JSON data"
 
-    for field in required_fields:
-        if field not in data or not data[field]:
+    allowed_fields = {
+        'account_name',
+        'api_key',
+        'api_secret',
+        'request_token',
+    }
+    unexpected = sorted(set(data) - allowed_fields)
+    if unexpected:
+        return False, f"Unsupported field: {unexpected[0]}"
+
+    required_fields = {
+        'account_name': (1, 100),
+        'api_key': (10, 255),
+        'api_secret': (10, 255),
+        'request_token': (1, 2048),
+    }
+    for field, (minimum, maximum) in required_fields.items():
+        value = data.get(field)
+        if not isinstance(value, str) or not value.strip():
             return False, f"Missing required field: {field}"
-
-    # Validate account name length
-    if len(data['account_name']) > 100:
-        return False, "Account name too long (max 100 characters)"
-
-    # Validate API key format (basic check)
-    if len(data['api_key']) < 10:
-        return False, "Invalid API key format"
-
-    if len(data['api_secret']) < 10:
-        return False, "Invalid API secret format"
-
-    # Require either an existing access token or a request token that can be
-    # exchanged for one by the backend.
-    if not data.get('access_token') and not data.get('request_token'):
-        return False, "Provide either an access token or a request token"
+        length = len(value.strip())
+        if length < minimum or length > maximum:
+            return False, (
+                f"{field} must be between {minimum} and {maximum} characters"
+            )
 
     return True, None
 

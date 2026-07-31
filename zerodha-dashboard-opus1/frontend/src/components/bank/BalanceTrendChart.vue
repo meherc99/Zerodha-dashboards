@@ -19,6 +19,7 @@ import {
   Filler
 } from 'chart.js'
 import { format, parseISO } from 'date-fns'
+import { formatCurrency } from '@/utils/currency'
 
 ChartJS.register(
   CategoryScale,
@@ -40,6 +41,10 @@ const props = defineProps({
   title: {
     type: String,
     default: 'Balance Trend'
+  },
+  currency: {
+    type: String,
+    default: 'INR'
   }
 })
 
@@ -99,7 +104,7 @@ const chartOptions = {
       cornerRadius: 8,
       callbacks: {
         label: (context) => {
-          return `Balance: ₹${context.parsed.y.toLocaleString('en-IN', {
+          return `Balance: ${formatCurrency(context.parsed.y, props.currency, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2
           })}`
@@ -124,7 +129,10 @@ const chartOptions = {
         color: 'rgba(0, 0, 0, 0.05)'
       },
       ticks: {
-        callback: (value) => `₹${(value / 1000).toFixed(0)}k`,
+        callback: value => formatCurrency(value, props.currency, {
+          maximumFractionDigits: 0,
+          notation: 'compact'
+        }),
         font: {
           size: 11
         }

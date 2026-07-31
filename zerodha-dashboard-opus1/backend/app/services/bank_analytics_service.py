@@ -18,7 +18,8 @@ class BankAnalyticsService:
         """Verify that the user owns the bank account"""
         account = BankAccount.query.filter_by(
             id=bank_account_id,
-            user_id=user_id
+            user_id=user_id,
+            is_active=True,
         ).first()
         return account is not None
 
@@ -121,21 +122,26 @@ class BankAnalyticsService:
 
         # Get category-wise spending (only debits)
         results = db.session.query(
-            TransactionCategory.id,
+            TransactionCategory.id.label('id'),
             TransactionCategory.name,
             TransactionCategory.icon,
             TransactionCategory.color,
             func.sum(Transaction.amount).label('total'),
             func.count(Transaction.id).label('count')
-        ).join(
-            Transaction,
-            Transaction.category_id == TransactionCategory.id
+        ).select_from(
+            Transaction
+        ).outerjoin(
+            TransactionCategory,
+            (
+                (Transaction.category_id == TransactionCategory.id)
+                & TransactionCategory.is_system.is_(True)
+            ),
         ).filter(
             Transaction.bank_account_id == bank_account_id,
             Transaction.transaction_date >= start_date,
             Transaction.transaction_date <= end_date,
             Transaction.transaction_type == 'debit',
-            Transaction.verified == True
+            Transaction.verified.is_(True),
         ).group_by(
             TransactionCategory.id,
             TransactionCategory.name,
@@ -154,9 +160,9 @@ class BankAnalyticsService:
 
             categories.append({
                 'id': result.id,
-                'name': result.name,
-                'icon': result.icon,
-                'color': result.color,
+                'name': result.name or 'Uncategorized',
+                'icon': result.icon or '❓',
+                'color': result.color or '#9ca3af',
                 'total': total_amount,
                 'percentage': round(percentage, 2),
                 'transaction_count': result.count
@@ -168,6 +174,10 @@ class BankAnalyticsService:
         return {
             'categories': categories,
             'total_spending': total_spending,
+            'transaction_count': sum(
+                category['transaction_count']
+                for category in categories
+            ),
             'period_days': period_days
         }
 
@@ -200,46 +210,46 @@ class BankAnalyticsService:
         # Calculate number of weeks (round up)
         num_weeks = (period_days + 6) // 7
 
-        periods = []
-        credits = []
-        debits = []
-        net = []
+        periods = [f'Week {week + 1}' for week in range(num_weeks)]
+        credits = [0.0] * num_weeks
+        debits = [0.0] * num_weeks
 
-        # Group transactions by week
-        for week_num in range(num_weeks):
-            week_start = start_date + timedelta(days=week_num * 7)
-            week_end = min(week_start + timedelta(days=6), end_date)
-
-            # Get credits for this week
-            credit_sum = db.session.query(
-                func.sum(Transaction.amount)
-            ).filter(
+        # One bounded aggregate query replaces two queries per displayed week.
+        daily_totals = (
+            db.session.query(
+                Transaction.transaction_date,
+                Transaction.transaction_type,
+                func.sum(Transaction.amount).label('total'),
+            )
+            .filter(
                 Transaction.bank_account_id == bank_account_id,
-                Transaction.transaction_date >= week_start,
-                Transaction.transaction_date <= week_end,
-                Transaction.transaction_type == 'credit',
-                Transaction.verified == True
-            ).scalar() or Decimal('0')
+                Transaction.transaction_date >= start_date,
+                Transaction.transaction_date <= end_date,
+                Transaction.transaction_type.in_(['credit', 'debit']),
+                Transaction.verified.is_(True),
+            )
+            .group_by(
+                Transaction.transaction_date,
+                Transaction.transaction_type,
+            )
+            .all()
+        )
+        for transaction_date, transaction_type, total in daily_totals:
+            week = min(
+                (transaction_date - start_date).days // 7,
+                num_weeks - 1,
+            )
+            if transaction_type == 'credit':
+                credits[week] += float(total or Decimal('0'))
+            else:
+                debits[week] += float(total or Decimal('0'))
 
-            # Get debits for this week
-            debit_sum = db.session.query(
-                func.sum(Transaction.amount)
-            ).filter(
-                Transaction.bank_account_id == bank_account_id,
-                Transaction.transaction_date >= week_start,
-                Transaction.transaction_date <= week_end,
-                Transaction.transaction_type == 'debit',
-                Transaction.verified == True
-            ).scalar() or Decimal('0')
-
-            credit_amount = float(credit_sum)
-            debit_amount = float(debit_sum)
-            net_amount = credit_amount - debit_amount
-
-            periods.append(f'Week {week_num + 1}')
-            credits.append(credit_amount)
-            debits.append(debit_amount)
-            net.append(net_amount)
+        net = [
+            round(credit - debit, 2)
+            for credit, debit in zip(credits, debits)
+        ]
+        credits = [round(value, 2) for value in credits]
+        debits = [round(value, 2) for value in debits]
 
         return {
             'periods': periods,
@@ -304,7 +314,12 @@ class BankAnalyticsService:
             return description[:20].strip()
 
     @staticmethod
-    def get_top_merchants(bank_account_id, limit, user_id):
+    def get_top_merchants(
+        bank_account_id,
+        limit,
+        user_id,
+        period_days=30,
+    ):
         """
         Get top spending merchants (debit transactions only).
 
@@ -312,6 +327,7 @@ class BankAnalyticsService:
             bank_account_id: ID of the bank account
             limit: Number of top merchants to return (default: 10)
             user_id: ID of the requesting user
+            period_days: Number of days to analyze (default: 30)
 
         Returns:
             {
@@ -330,7 +346,11 @@ class BankAnalyticsService:
         if not BankAnalyticsService.verify_ownership(bank_account_id, user_id):
             return None
 
-        # Get all debit transactions with merchant info
+        end_date = date.today()
+        start_date = end_date - timedelta(days=period_days)
+
+        # Keep merchant rankings in the same selected period as the rest of
+        # the analytics dashboard.
         transactions = db.session.query(
             Transaction.description,
             Transaction.merchant_name,
@@ -338,7 +358,9 @@ class BankAnalyticsService:
         ).filter(
             Transaction.bank_account_id == bank_account_id,
             Transaction.transaction_type == 'debit',
-            Transaction.verified == True
+            Transaction.verified.is_(True),
+            Transaction.transaction_date >= start_date,
+            Transaction.transaction_date <= end_date,
         ).all()
 
         # Group by merchant
@@ -374,7 +396,8 @@ class BankAnalyticsService:
 
         return {
             'merchants': merchants,
-            'limit': limit
+            'limit': limit,
+            'period_days': period_days,
         }
 
     @staticmethod
@@ -401,7 +424,7 @@ class BankAnalyticsService:
         import math
 
         # Verify ownership
-        if not BankAnalyticsService._verify_ownership(bank_account_id, user_id):
+        if not BankAnalyticsService.verify_ownership(bank_account_id, user_id):
             return None
 
         # Get all verified debit transactions (credits are typically expected)
@@ -444,8 +467,11 @@ class BankAnalyticsService:
                 anomaly['anomaly_score'] = round(z_score, 2)
                 anomaly['deviation_from_mean'] = round(amount - mean, 2)
 
-                if txn.category:
+                if txn.category and txn.category.is_system:
                     anomaly['category'] = txn.category.to_dict()
+                else:
+                    anomaly['category_id'] = None
+                    anomaly['category'] = None
 
                 anomalies.append(anomaly)
 
@@ -484,12 +510,12 @@ class BankAnalyticsService:
         from decimal import Decimal
 
         # Verify ownership
-        if not BankAnalyticsService._verify_ownership(bank_account_id, user_id):
+        if not BankAnalyticsService.verify_ownership(bank_account_id, user_id):
             return None
 
         # Get current balance
-        bank_account = BankAccount.query.get(bank_account_id)
-        current_balance = float(bank_account.current_balance)
+        bank_account = db.session.get(BankAccount, bank_account_id)
+        current_balance = float(bank_account.current_balance or 0)
 
         # Get transactions from last 90 days for trend analysis
         ninety_days_ago = date.today() - timedelta(days=90)
@@ -499,13 +525,6 @@ class BankAnalyticsService:
             Transaction.transaction_date >= ninety_days_ago,
             Transaction.verified == True
         ).order_by(Transaction.transaction_date.asc()).all()
-
-        if len(transactions) < 14:
-            return {
-                'predictions': [],
-                'message': 'Insufficient transaction history for prediction (minimum 14 days required)',
-                'forecast_days': forecast_days
-            }
 
         # Calculate daily net spending (debits - credits)
         daily_spending = {}
@@ -521,6 +540,15 @@ class BankAnalyticsService:
 
         # Convert to list of (day_index, net_spending)
         sorted_dates = sorted(daily_spending.keys())
+        if len(sorted_dates) < 14:
+            return {
+                'predictions': [],
+                'message': (
+                    'Insufficient transaction history for prediction '
+                    '(minimum 14 distinct days required)'
+                ),
+                'forecast_days': forecast_days,
+            }
         base_date = sorted_dates[0]
 
         data_points = []
@@ -536,7 +564,12 @@ class BankAnalyticsService:
         sum_x2 = sum(x * x for x, y in data_points)
 
         # Calculate slope and intercept
-        slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x)
+        denominator = n * sum_x2 - sum_x * sum_x
+        slope = (
+            (n * sum_xy - sum_x * sum_y) / denominator
+            if denominator
+            else 0
+        )
         intercept = (sum_y - slope * sum_x) / n
 
         # Average daily spending

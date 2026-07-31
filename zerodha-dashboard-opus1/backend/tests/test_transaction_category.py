@@ -10,10 +10,12 @@ from app.models.transaction_category import TransactionCategory
 @pytest.fixture
 def app():
     """Create and configure test app"""
-    app = create_app()
-    app.config.update({
+    app = create_app({
         'TESTING': True,
         'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+        'JWT_SECRET_KEY': 'test-jwt-secret-key-at-least-32-bytes',
+        'SECRET_KEY': 'test-secret-key',
+        'SCHEDULER_ENABLED': False,
     })
 
     with app.app_context():
@@ -188,7 +190,9 @@ def test_category_to_dict(app):
         assert category_dict['icon'] == '🏥'
         assert category_dict['color'] == '#ef4444'
         assert category_dict['parent_category_id'] is None
-        assert category_dict['keywords'] == ['doctor', 'hospital', 'pharmacy', 'medicine']
+        # Matching rules can contain sensitive terms learned from statement
+        # descriptions and are never part of the public category DTO.
+        assert 'keywords' not in category_dict
         assert category_dict['is_system'] is True
         assert 'created_at' in category_dict
         assert isinstance(category_dict['created_at'], str)  # Should be ISO format

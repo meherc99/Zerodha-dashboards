@@ -34,10 +34,20 @@ class Transaction(db.Model):
     category = db.relationship('TransactionCategory', back_populates='transactions')
     statement = db.relationship('BankStatement', back_populates='transactions')
 
-    # Indexes will be created in migration:
-    # idx_transactions_bank_account_date (bank_account_id, transaction_date DESC)
-    # idx_transactions_category (category_id)
-    # idx_transactions_filters (bank_account_id, transaction_date, transaction_type, category_id)
+    __table_args__ = (
+        db.Index(
+            'idx_transactions_bank_account_date',
+            'bank_account_id',
+            'transaction_date',
+        ),
+        db.Index(
+            'idx_transactions_filters',
+            'bank_account_id',
+            'transaction_date',
+            'transaction_type',
+            'category_id',
+        ),
+    )
 
     def __repr__(self):
         return f'<Transaction {self.transaction_type} {self.amount} on {self.transaction_date}>'
