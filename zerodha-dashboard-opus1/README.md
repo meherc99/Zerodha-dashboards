@@ -199,4 +199,4 @@ For interactive frontend test development, use `npm run test:watch`.
 - Treat the frontend’s JWT storage as sensitive: avoid untrusted scripts and deploy a strict Content Security Policy at the reverse proxy.
 - The built-in scheduler belongs in only one process. In a multi-worker deployment, disable it with `SCHEDULER_ENABLED=false` and run one designated scheduler process.
 
-Additional backend and frontend details are in [backend/README.md](backend/README.md) and [frontend/README.md](frontend/README.md).
+Additional backend and frontend details are in [backend/README.md](backend/README.md) and [frontend/README.md](frontend/README.md). The complete consolidation change record is in [docs/wiki.md](docs/wiki.md).
