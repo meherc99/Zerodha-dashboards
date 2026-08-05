@@ -1,0 +1,184 @@
+<h2>Which layout works best for the Bank Balances tab?</h2>
+<p class="subtitle">Consider how you'll navigate between multiple banks and view transaction details</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Sidebar + Main Content</h3>
+      <div class="mockup" style="margin-top: 15px;">
+        <div class="mockup-body" style="padding: 0;">
+          <div style="display: flex; min-height: 300px;">
+            <div class="mock-sidebar" style="width: 200px; border-right: 1px solid #e5e7eb; padding: 15px;">
+              <div style="font-weight: 600; margin-bottom: 10px; font-size: 12px; color: #6b7280;">BANKS</div>
+              <div style="padding: 8px; background: #eff6ff; border-radius: 4px; margin-bottom: 5px; color: #3b82f6; font-size: 13px;">🏦 HDFC Bank</div>
+              <div style="padding: 8px; border-radius: 4px; margin-bottom: 5px; color: #6b7280; font-size: 13px;">🏦 SBI</div>
+              <div style="padding: 8px; border-radius: 4px; margin-bottom: 5px; color: #6b7280; font-size: 13px;">🏦 ICICI</div>
+              <div style="padding: 8px; margin-top: 15px; color: #3b82f6; font-size: 13px; cursor: pointer;">+ Add Bank</div>
+            </div>
+            <div style="flex: 1; padding: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">HDFC Bank</h3>
+                <div style="font-size: 24px; font-weight: 700; color: #111827;">₹2,45,678</div>
+              </div>
+              <div class="placeholder" style="height: 200px; margin-bottom: 15px;">Transactions Table</div>
+              <div class="placeholder" style="height: 150px;">Charts & Analytics</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top: 15px;">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>Quick bank switching</li>
+            <li>Always visible bank list</li>
+            <li>Similar to file explorer pattern</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>Takes horizontal space</li>
+            <li>Sidebar can get long with many banks</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Dropdown Selector + Full Width</h3>
+      <div class="mockup" style="margin-top: 15px;">
+        <div class="mockup-body">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div>
+              <select class="mock-input" style="width: 200px; padding: 8px; font-size: 14px;">
+                <option>🏦 HDFC Bank</option>
+                <option>🏦 SBI</option>
+                <option>🏦 ICICI</option>
+              </select>
+            </div>
+            <div>
+              <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Current Balance</div>
+              <div style="font-size: 28px; font-weight: 700; color: #111827;">₹2,45,678</div>
+            </div>
+          </div>
+          <div class="placeholder" style="height: 200px; margin-bottom: 15px;">Transactions Table</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div class="placeholder" style="height: 150px;">Chart 1</div>
+            <div class="placeholder" style="height: 150px;">Chart 2</div>
+          </div>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top: 15px;">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>Maximum horizontal space for content</li>
+            <li>Clean, minimal interface</li>
+            <li>Consistent with account selector pattern</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>Extra click to see other banks</li>
+            <li>Can't see all banks at once</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Tab-Based (Horizontal Tabs per Bank)</h3>
+      <div class="mockup" style="margin-top: 15px;">
+        <div class="mockup-body" style="padding: 0;">
+          <div style="display: flex; border-bottom: 2px solid #e5e7eb; padding: 0 20px;">
+            <div style="padding: 12px 20px; border-bottom: 3px solid #3b82f6; color: #3b82f6; font-weight: 600; margin-bottom: -2px;">HDFC Bank</div>
+            <div style="padding: 12px 20px; color: #6b7280;">SBI</div>
+            <div style="padding: 12px 20px; color: #6b7280;">ICICI</div>
+            <div style="padding: 12px 20px; color: #3b82f6; margin-left: auto;">+ Add Bank</div>
+          </div>
+          <div style="padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+              <h3 style="margin: 0;">Account Summary</h3>
+              <div style="font-size: 28px; font-weight: 700; color: #111827;">₹2,45,678</div>
+            </div>
+            <div class="placeholder" style="height: 200px; margin-bottom: 15px;">Transactions Table</div>
+            <div class="placeholder" style="height: 150px;">Charts & Analytics</div>
+          </div>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top: 15px;">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>All banks visible at top</li>
+            <li>One-click bank switching</li>
+            <li>Familiar browser tab pattern</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>Can get crowded with many banks</li>
+            <li>May need horizontal scrolling on mobile</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="d" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>Card Grid (All Banks Visible)</h3>
+      <div class="mockup" style="margin-top: 15px;">
+        <div class="mockup-body">
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">
+            <div style="background: #eff6ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 15px; cursor: pointer;">
+              <div style="font-size: 14px; color: #3b82f6; font-weight: 600; margin-bottom: 8px;">🏦 HDFC Bank</div>
+              <div style="font-size: 24px; font-weight: 700; color: #111827;">₹2,45,678</div>
+              <div style="font-size: 12px; color: #059669; margin-top: 5px;">↑ ₹12,500 this month</div>
+            </div>
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; cursor: pointer;">
+              <div style="font-size: 14px; color: #6b7280; font-weight: 600; margin-bottom: 8px;">🏦 SBI</div>
+              <div style="font-size: 24px; font-weight: 700; color: #111827;">₹89,234</div>
+              <div style="font-size: 12px; color: #dc2626; margin-top: 5px;">↓ ₹5,200 this month</div>
+            </div>
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; cursor: pointer;">
+              <div style="font-size: 14px; color: #6b7280; font-weight: 600; margin-bottom: 8px;">🏦 ICICI</div>
+              <div style="font-size: 24px; font-weight: 700; color: #111827;">₹1,56,890</div>
+              <div style="font-size: 12px; color: #059669; margin-top: 5px;">↑ ₹8,900 this month</div>
+            </div>
+          </div>
+          <div class="placeholder" style="height: 200px; margin-bottom: 15px;">Selected Bank: HDFC - Transactions Table</div>
+          <div class="placeholder" style="height: 150px;">Charts & Analytics</div>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top: 15px;">
+        <div class="pros">
+          <h4>Pros</h4>
+          <ul>
+            <li>Overview of all balances at once</li>
+            <li>Quick visual comparison</li>
+            <li>Shows summary stats per bank</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>Cons</h4>
+          <ul>
+            <li>Takes vertical space</li>
+            <li>Less space for transaction details</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
