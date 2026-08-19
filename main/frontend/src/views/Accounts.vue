@@ -9,10 +9,14 @@
 
     <div v-else class="accounts-grid">
       <div v-for="account in accountsStore.accounts" :key="account.id" class="account-card">
+        <div v-if="account.needs_reauth" class="reauth-banner">
+          <span>⚠️ Kite token expired</span>
+          <button type="button" class="reauth-banner-btn" @click="openReconnectModal(account)">Re-authenticate →</button>
+        </div>
         <div class="account-header">
           <h3>{{ account.account_name }}</h3>
-          <span class="status-badge" :class="{ active: account.is_active }">
-            {{ account.is_active ? 'Active' : 'Inactive' }}
+          <span class="status-badge" :class="{ active: account.is_active, reauth: account.needs_reauth }">
+            {{ account.needs_reauth ? 'Needs Reauth' : account.is_active ? 'Active' : 'Inactive' }}
           </span>
         </div>
         <div class="account-details">
@@ -424,6 +428,40 @@ accountsStore.fetchAccounts()
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.reauth-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #9a3412;
+  font-weight: 500;
+}
+
+.reauth-banner-btn {
+  background: #ea580c;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reauth-banner-btn:hover {
+  background: #c2410c;
+}
+
+.status-badge.reauth {
+  background: #fff7ed;
+  color: #9a3412;
 }
 
 .account-header {

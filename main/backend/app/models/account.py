@@ -28,6 +28,7 @@ class Account(db.Model):
 
     # Status and metadata
     is_active = db.Column(db.Boolean, default=True)
+    needs_reauth = db.Column(db.Boolean, nullable=False, default=False, server_default='false')
     portfolio_version = db.Column(
         db.Integer,
         nullable=False,
@@ -58,6 +59,7 @@ class Account(db.Model):
             'id': self.id,
             'account_name': self.account_name,
             'is_active': self.is_active,
+            'needs_reauth': bool(self.needs_reauth),
             'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

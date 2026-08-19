@@ -1,15 +1,21 @@
 """
 AMFI (Association of Mutual Funds in India) NAV enrichment service.
 
-Uses two free, unauthenticated public sources:
-  1. https://www.amfiindia.com/spages/NAVAll.txt
-     Full daily NAV feed for all schemes.  Parsed to build an ISIN→scheme-code
-     map and capture today's official NAV.
+Uses mfapi.in — a free, unauthenticated community API wrapping AMFI data:
+  https://api.mfapi.in/mf/<scheme_code>
 
-  2. https://api.mfapi.in/mf/<scheme_code>
-     Community wrapper around AMFI historical data.  Returns the last N NAV
-     entries so we can grab the two most-recent values and compute a genuine
-     day-over-day change.
+Strategy for resolving Kite MF holdings → mfapi.in scheme_code:
+
+  1. **Numeric tradingsymbol** (primary path)
+     Kite Coin platform stores the AMFI scheme code as the tradingsymbol
+     for directly-held regular/direct mutual fund units.  If the
+     tradingsymbol is an integer string we query mfapi.in directly with it.
+
+  2. **ISIN lookup via mfapi.in search** (fallback)
+     If the tradingsymbol is not numeric, we search mfapi.in by fund name
+     keywords and verify the result by matching ``meta.isin_growth`` or
+     ``meta.isin_div_reinvestment`` against the Kite ISIN.  Results are
+     cached for the lifetime of the process.
 
 The service is intentionally stateless and makes no database calls.  It is
 called from KiteService.get_mutual_fund_holdings() after the Kite /mf/holdings
@@ -18,175 +24,194 @@ response is available.
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Tuple
 
 import requests
 
 logger = logging.getLogger(__name__)
 
-_AMFI_NAV_URL = 'https://www.amfiindia.com/spages/NAVAll.txt'
-_MFAPI_URL = 'https://api.mfapi.in/mf/{scheme_code}'
+_MFAPI_BASE = 'https://api.mfapi.in/mf'
 
-# Shared session for connection reuse
+# Module-level session for connection reuse
 _session = requests.Session()
 _session.headers.update({'User-Agent': 'ZerodhaDashboard/1.0'})
 _TIMEOUT = 10  # seconds per request
 
+# In-process cache: ISIN → scheme_code string
+_isin_scheme_cache: Dict[str, Optional[str]] = {}
+
 
 # ---------------------------------------------------------------------------
-# Public helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
 
-def fetch_nav_feed() -> Dict[str, dict]:
+def _fetch_scheme_data(scheme_code: str) -> Optional[dict]:
     """
-    Download and parse the AMFI NAV-all text feed.
+    Fetch full scheme data from mfapi.in for *scheme_code*.
 
-    Returns
-    -------
-    dict keyed by ISIN (both payout and growth ISINs map to the same entry)::
-
-        {
-            '<isin>': {
-                'scheme_code': '100028',
-                'scheme_name': 'ICICI Pru Liquid …',
-                'nav': Decimal('100.4538'),
-                'nav_date': '03-Aug-2026',
-            },
-            …
-        }
+    Returns the parsed JSON dict (keys: ``meta``, ``data``) or None on failure.
     """
+    url = f'{_MFAPI_BASE}/{scheme_code}'
     try:
-        resp = _session.get(_AMFI_NAV_URL, timeout=_TIMEOUT)
+        resp = _session.get(url, timeout=_TIMEOUT)
         resp.raise_for_status()
-    except requests.RequestException as exc:
-        logger.warning('AMFI feed fetch failed: %s', exc)
-        return {}
-
-    result: Dict[str, dict] = {}
-    for line in resp.text.splitlines():
-        line = line.strip()
-        if not line or ';' not in line:
-            continue
-        parts = line.split(';')
-        if len(parts) < 6:
-            continue
-        scheme_code, isin1, isin2, scheme_name, nav_str, nav_date = (
-            parts[0].strip(),
-            parts[1].strip(),
-            parts[2].strip(),
-            parts[3].strip(),
-            parts[4].strip(),
-            parts[5].strip(),
-        )
-        try:
-            nav = Decimal(nav_str)
-        except Exception:
-            continue
-
-        entry = {
-            'scheme_code': scheme_code,
-            'scheme_name': scheme_name,
-            'nav': nav,
-            'nav_date': nav_date,
-        }
-        for isin in (isin1, isin2):
-            if isin and isin != '-':
-                result[isin] = entry
-
-    logger.info('AMFI feed parsed: %d ISIN entries', len(result))
-    return result
-
-
-def fetch_previous_nav(scheme_code: str) -> Optional[Decimal]:
-    """
-    Fetch the two most-recent NAV entries from mfapi.in for *scheme_code*
-    and return the second-most-recent value (i.e. "yesterday's" NAV).
-
-    Returns None on any failure so callers can degrade gracefully.
-    """
-    url = _MFAPI_URL.format(scheme_code=scheme_code)
-    try:
-        resp = _session.get(url, timeout=_TIMEOUT, params={'type': 'json'})
-        resp.raise_for_status()
-        data = resp.json().get('data', [])
-        if len(data) >= 2:
-            return Decimal(str(data[1]['nav']))
-        if len(data) == 1:
-            # Only one entry available — no previous day to compare
+        payload = resp.json()
+        # mfapi returns {"error": "..."} for bad codes
+        if 'error' in payload:
             return None
+        return payload
     except Exception as exc:
         logger.debug('mfapi fetch failed for scheme %s: %s', scheme_code, exc)
+        return None
+
+
+def _search_scheme_by_name(keywords: str) -> List[dict]:
+    """Search mfapi.in by name keywords. Returns list of {schemeCode, schemeName}."""
+    try:
+        resp = _session.get(
+            f'{_MFAPI_BASE}/search',
+            params={'q': keywords},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.json() or []
+    except Exception as exc:
+        logger.debug('mfapi search failed for %r: %s', keywords, exc)
+        return []
+
+
+def _resolve_scheme_code_by_isin(isin: str, fund_name: str) -> Optional[str]:
+    """
+    Resolve a Kite ISIN to an mfapi.in scheme_code.
+
+    Tries a name-keyword search, then verifies each candidate by checking
+    ``meta.isin_growth`` / ``meta.isin_div_reinvestment``.
+
+    Results (including misses) are cached for the process lifetime.
+    """
+    if isin in _isin_scheme_cache:
+        return _isin_scheme_cache[isin]
+
+    # Build search keywords from fund name (first 3 significant words)
+    words = [w for w in fund_name.replace('-', ' ').split() if len(w) > 2]
+    query = ' '.join(words[:4]) if words else fund_name[:30]
+
+    candidates = _search_scheme_by_name(query)
+    for candidate in candidates:
+        sc = str(candidate.get('schemeCode', ''))
+        if not sc:
+            continue
+        data = _fetch_scheme_data(sc)
+        if not data:
+            continue
+        meta = data.get('meta', {})
+        if isin in (meta.get('isin_growth'), meta.get('isin_div_reinvestment')):
+            logger.info('Resolved ISIN %s → scheme_code %s via name search', isin, sc)
+            _isin_scheme_cache[isin] = sc
+            return sc
+
+    logger.debug('Could not resolve ISIN %s (query=%r) to any scheme_code', isin, query)
+    _isin_scheme_cache[isin] = None
     return None
 
+
+def _navs_from_scheme_data(scheme_data: dict) -> Tuple[Optional[Decimal], Optional[Decimal]]:
+    """
+    Extract (today_nav, yesterday_nav) from mfapi.in scheme data.
+    Returns (None, None) if data is insufficient.
+    """
+    entries = scheme_data.get('data', [])
+    try:
+        today = Decimal(str(entries[0]['nav'])) if len(entries) >= 1 else None
+        yesterday = Decimal(str(entries[1]['nav'])) if len(entries) >= 2 else None
+        return today, yesterday
+    except (KeyError, IndexError, InvalidOperation):
+        return None, None
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def enrich_mf_holdings(holdings: List[dict]) -> List[dict]:
     """
     Given a list of normalised MF holding dicts (from KiteService), add
-    accurate ``day_change`` and ``day_change_percentage`` using AMFI data.
+    accurate ``day_change`` and ``day_change_percentage`` using mfapi.in.
 
-    The function:
-      1. Fetches the full AMFI NAV feed once.
-      2. For each holding whose ISIN is found in the feed, calls mfapi.in
-         to retrieve yesterday's NAV.
-      3. Updates ``last_price``, ``day_change``, and ``day_change_percentage``
-         in-place and returns the (possibly mutated) list.
+    Strategy per holding:
+      1. If ``tradingsymbol`` is numeric → use as mfapi.in scheme_code directly.
+      2. Else if ``isin`` is present → attempt ISIN→scheme_code resolution via
+         mfapi.in name search + ISIN verification.
+      3. If neither works, leave day_change = 0 (Kite default).
 
-    Holdings whose ISIN is absent from the feed (e.g. ETFs traded on exchange
-    rather than via Coin, or missing ISIN) are left unchanged.
+    Updates are done **in-place**; the same list is returned.
     """
     if not holdings:
         return holdings
 
-    nav_feed = fetch_nav_feed()
-    if not nav_feed:
-        logger.warning('AMFI feed empty — skipping MF day-change enrichment')
-        return holdings
+    # Collect unique scheme lookups to minimise HTTP calls
+    # key → scheme_code str (or None if unresolvable)
+    holding_scheme: List[Optional[str]] = []
 
-    # Deduplicate scheme_code requests
-    isin_to_entry: Dict[str, dict] = {}
+    seen: Dict[str, Optional[str]] = {}  # tradingsymbol/isin → scheme_code
+
     for holding in holdings:
-        isin = holding.get('isin')
-        if isin and isin in nav_feed:
-            isin_to_entry[isin] = nav_feed[isin]
+        symbol = holding.get('tradingsymbol', '')
+        isin = holding.get('isin', '')
 
-    # Fetch previous-day NAVs (one request per unique scheme_code)
-    scheme_code_to_prev: Dict[str, Optional[Decimal]] = {}
-    fetched_scheme_codes = set()
-    for isin, entry in isin_to_entry.items():
-        sc = entry['scheme_code']
-        if sc not in fetched_scheme_codes:
-            fetched_scheme_codes.add(sc)
-            scheme_code_to_prev[sc] = fetch_previous_nav(sc)
+        if symbol.isdigit():
+            # Primary path: Kite Coin stores AMFI scheme_code as tradingsymbol
+            sc = symbol
+        elif isin:
+            fund_name = holding.get('fund_name') or holding.get('tradingsymbol') or ''
+            cache_key = isin
+            if cache_key not in seen:
+                seen[cache_key] = _resolve_scheme_code_by_isin(isin, fund_name)
+            sc = seen[cache_key]
+        else:
+            sc = None
+
+        holding_scheme.append(sc)
+
+    # Fetch scheme data (deduplicated)
+    scheme_data_cache: Dict[str, Optional[dict]] = {}
+    for sc in set(filter(None, holding_scheme)):
+        if sc not in scheme_data_cache:
+            scheme_data_cache[sc] = _fetch_scheme_data(sc)
 
     # Enrich holdings
     enriched = 0
-    for holding in holdings:
-        isin = holding.get('isin')
-        if not isin or isin not in isin_to_entry:
+    for holding, sc in zip(holdings, holding_scheme):
+        if not sc:
             continue
-        entry = isin_to_entry[isin]
-        current_nav = entry['nav']
-        prev_nav = scheme_code_to_prev.get(entry['scheme_code'])
+        data = scheme_data_cache.get(sc)
+        if not data:
+            continue
 
-        # Update last_price to today's official AMFI NAV
-        holding['last_price'] = current_nav
+        today_nav, yesterday_nav = _navs_from_scheme_data(data)
+        if today_nav is None:
+            continue
 
-        # Recompute current_value with fresh NAV
         qty = holding.get('quantity', Decimal('0'))
-        holding['current_value'] = qty * current_nav
 
-        if prev_nav and prev_nav > 0:
-            day_change = current_nav - prev_nav
-            holding['day_change'] = day_change
-            holding['day_change_percentage'] = (day_change / prev_nav) * 100
+        # Update last_price and current_value to official AMFI NAV
+        holding['last_price'] = today_nav
+        holding['current_value'] = qty * today_nav
+
+        if yesterday_nav and yesterday_nav > 0:
+            day_change_per_unit = today_nav - yesterday_nav
+            holding['day_change'] = day_change_per_unit * qty
+            holding['day_change_percentage'] = float(
+                (day_change_per_unit / yesterday_nav) * 100
+            )
             enriched += 1
         else:
             holding['day_change'] = Decimal('0')
-            holding['day_change_percentage'] = Decimal('0')
+            holding['day_change_percentage'] = 0.0
 
     logger.info(
-        'AMFI enrichment: %d/%d MF holdings got day-change data',
+        'mfapi enrichment: %d/%d MF holdings got day-change data',
         enriched, len(holdings),
     )
     return holdings

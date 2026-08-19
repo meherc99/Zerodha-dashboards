@@ -28,7 +28,7 @@ class Config:
 
     # Scheduler
     SCHEDULER_API_ENABLED = True
-    SCHEDULER_ENABLED = os.environ.get('SCHEDULER_ENABLED', 'true').lower() in {
+    SCHEDULER_ENABLED = os.environ.get('SCHEDULER_ENABLED', 'false').lower() in {
         '1', 'true', 'yes'
     }
     SCHEDULER_TIMEZONE = "Asia/Kolkata"

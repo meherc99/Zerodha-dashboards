@@ -4,6 +4,7 @@ import logging
 import uuid
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from kiteconnect.exceptions import TokenException
 
 from app.database import db
 from app.models import Account, Holding, Snapshot
@@ -81,7 +82,7 @@ class SchedulerService:
                     self.sync_user_accounts(user_id, trigger='scheduled')
                 )
             except Exception:
-                logger.error('Scheduled sync failed for user %s', user_id)
+                logger.error('Scheduled sync failed for user %s', user_id, exc_info=True)
                 db.session.rollback()
         return results
 
@@ -123,9 +124,25 @@ class SchedulerService:
                     count,
                     account.account_name,
                 )
+            except TokenException as exc:
+                failed += 1
+                logger.error(
+                    'Sync failed for account %s — Kite access token expired or invalid: %s',
+                    account.id, exc,
+                )
+                with db.session.begin_nested():
+                    failed_snapshot = Snapshot(
+                        account_id=account.id,
+                        batch_id=batch_id,
+                        snapshot_date=batch_date,
+                        status='failed',
+                        trigger=trigger,
+                        error_message=f'Kite token expired — please re-authenticate: {exc}',
+                    )
+                    db.session.add(failed_snapshot)
             except Exception:
                 failed += 1
-                logger.error('Sync failed for account %s', account.id)
+                logger.error('Sync failed for account %s', account.id, exc_info=True)
                 with db.session.begin_nested():
                     failed_snapshot = Snapshot(
                         account_id=account.id,

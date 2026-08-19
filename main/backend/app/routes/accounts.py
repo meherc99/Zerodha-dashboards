@@ -265,6 +265,7 @@ def update_account(account_id):
                 )
             account.access_token_encrypted = encryptor.encrypt(generated_token)
             account.request_token_encrypted = None
+            account.needs_reauth = False
 
         if 'is_active' in data:
             account.is_active = data['is_active']

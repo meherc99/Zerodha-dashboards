@@ -56,7 +56,7 @@ class KiteService:
             logger.info("Access token generated successfully")
             return self.access_token
         except Exception:
-            logger.error("Kite session generation failed")
+            logger.error("Kite session generation failed", exc_info=True)
             raise
 
     @staticmethod
@@ -138,7 +138,7 @@ class KiteService:
             logger.info("Fetched %s equity holdings", len(processed_holdings))
             return processed_holdings
         except Exception:
-            logger.error("Kite equity-holdings fetch failed")
+            logger.error("Kite equity-holdings fetch failed", exc_info=True)
             raise
 
     def get_mutual_fund_holdings(self) -> List[Dict]:
@@ -196,7 +196,7 @@ class KiteService:
             from app.services.amfi_service import enrich_mf_holdings
             return enrich_mf_holdings(processed_holdings)
         except Exception:
-            logger.error("Kite mutual-fund fetch failed")
+            logger.error("Kite mutual-fund fetch failed", exc_info=True)
             raise
 
     def get_holdings(self) -> List[Dict]:
@@ -218,7 +218,7 @@ class KiteService:
             logger.info("Fetched positions successfully")
             return positions
         except Exception:
-            logger.error("Kite positions fetch failed")
+            logger.error("Kite positions fetch failed", exc_info=True)
             raise
 
     def get_historical_data(
@@ -263,7 +263,7 @@ class KiteService:
             return df
 
         except Exception:
-            logger.error("Kite historical-data fetch failed")
+            logger.error("Kite historical-data fetch failed", exc_info=True)
             raise
 
     def get_instruments(self, exchange: str = "NSE") -> pd.DataFrame:
@@ -282,7 +282,7 @@ class KiteService:
             logger.info(f"Fetched {len(df)} instruments for {exchange}")
             return df
         except Exception:
-            logger.error("Kite instruments fetch failed")
+            logger.error("Kite instruments fetch failed", exc_info=True)
             raise
 
     def get_quote(self, symbols: List[str]) -> Dict:
@@ -302,7 +302,7 @@ class KiteService:
             quotes = self.kite.quote(symbols)
             return quotes
         except Exception:
-            logger.error("Kite quote fetch failed")
+            logger.error("Kite quote fetch failed", exc_info=True)
             raise
 
     def get_profile(self) -> Dict:
@@ -319,7 +319,7 @@ class KiteService:
             profile = self.kite.profile()
             return profile
         except Exception:
-            logger.error("Kite profile fetch failed")
+            logger.error("Kite profile fetch failed", exc_info=True)
             raise
 
     @staticmethod
