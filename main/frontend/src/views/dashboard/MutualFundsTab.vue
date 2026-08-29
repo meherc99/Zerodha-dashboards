@@ -74,6 +74,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useHoldingsStore } from '@/stores/holdings'
 import { useAccountsStore } from '@/stores/accounts'
 import { useUiStore } from '@/stores/ui'
@@ -85,6 +86,7 @@ import PieChart from '@/components/charts/PieChart.vue'
 import BarChart from '@/components/charts/BarChart.vue'
 
 const holdingsStore = useHoldingsStore()
+const router = useRouter()
 const accountsStore = useAccountsStore()
 const uiStore = useUiStore()
 
@@ -136,6 +138,12 @@ const retrySync = async () => {
     await holdingsStore.syncHoldings(accountsStore.currentAccount || null)
     uiStore.addNotification({ type: 'success', message: 'Portfolio synced successfully.' })
   } catch {
+    await accountsStore.fetchAccounts()
+    const reauthAccount = accountsStore.accounts.find(a => a.needs_reauth)
+    if (reauthAccount) {
+      router.push({ path: '/accounts', query: { reauth: reauthAccount.id } })
+      return
+    }
     uiStore.addNotification({ type: 'error', message: holdingsStore.error || 'Portfolio sync failed.' })
   }
 }

@@ -74,6 +74,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useHoldingsStore } from '@/stores/holdings'
 import { useAccountsStore } from '@/stores/accounts'
 import { useUiStore } from '@/stores/ui'
@@ -84,6 +85,7 @@ import AccountSelector from '@/components/dashboard/AccountSelector.vue'
 import Sidebar from '@/components/dashboard/Sidebar.vue'
 
 const holdingsStore = useHoldingsStore()
+const router = useRouter()
 const accountsStore = useAccountsStore()
 const uiStore = useUiStore()
 
@@ -154,6 +156,14 @@ const handleSync = async () => {
       message: 'Portfolio synced successfully.'
     })
   } catch (error) {
+    // Refresh accounts so needs_reauth is up-to-date
+    await accountsStore.fetchAccounts()
+    // If a token expired, navigate to Accounts page and auto-open reconnect
+    const reauthAccount = accountsStore.accounts.find(a => a.needs_reauth)
+    if (reauthAccount) {
+      router.push({ path: '/accounts', query: { reauth: reauthAccount.id } })
+      return
+    }
     uiStore.addNotification({
       type: 'error',
       message: holdingsStore.error || 'Failed to sync portfolio.'
@@ -198,18 +208,19 @@ onMounted(async () => {
 
 <style scoped>
 .dashboard-layout {
-  min-height: calc(100vh - 68px);
+  min-height: calc(100vh - 64px);
 }
 
 .dashboard-header {
   display: flex;
-  min-height: 118px;
+  min-height: 110px;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
   padding: 20px 28px;
   border-bottom: 1px solid var(--color-border);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(4, 12, 24, 0.60);
+  backdrop-filter: blur(12px);
 }
 
 .dashboard-header h1 {
@@ -270,7 +281,8 @@ onMounted(async () => {
   gap: 18px;
   margin: 18px 28px 0;
   padding: 13px 15px;
-  border: 1px solid #efc5c9;
+  border: 1px solid rgba(255, 69, 96, 0.28);
+  border-left: 3px solid var(--color-negative);
   border-radius: 12px;
   background: var(--color-negative-soft);
   color: var(--color-negative);
@@ -284,12 +296,11 @@ onMounted(async () => {
 
 .error-banner span {
   margin-top: 2px;
-  color: #8e4b51;
+  color: var(--color-text-soft);
 }
 
 .error-banner .secondary-button {
   min-height: 36px;
-  background: rgba(255, 255, 255, 0.65);
 }
 
 .initial-loader {
@@ -318,7 +329,7 @@ onMounted(async () => {
 
 @media (max-width: 768px) {
   .dashboard-layout {
-    min-height: calc(100vh - 62px);
+    min-height: calc(100vh - 58px);
   }
 
   .dashboard-header {
