@@ -428,7 +428,7 @@ const formatFileSize = bytes => {
   height: 38px;
   place-items: center;
   border-radius: 10px;
-  background: #e8f1e9;
+  background: var(--color-positive-soft);
   color: #28713a;
   font-size: 0.65rem;
   font-weight: 850;
@@ -522,14 +522,14 @@ const formatFileSize = bytes => {
   flex: 0 0 30px;
   place-items: center;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-surface-strong);
   color: var(--color-positive);
   font-weight: 850;
 }
 
 .currency-notice p {
   margin: 0;
-  color: #376a5a;
+  color: var(--color-text-soft);
   font-size: 0.75rem;
 }
 
