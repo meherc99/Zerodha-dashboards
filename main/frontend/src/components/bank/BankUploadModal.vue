@@ -270,11 +270,9 @@ const formatFileSize = (bytes) => {
 <style scoped>
 .modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -283,13 +281,24 @@ const formatFileSize = (bytes) => {
 }
 
 .modal-content {
-  background: white;
-  border-radius: 16px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255,255,255,0.05);
   max-width: 500px;
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
+  position: relative;
+}
+
+.modal-content::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: linear-gradient(90deg, transparent, rgba(61,126,255,0.5), rgba(167,139,250,0.4), transparent);
 }
 
 .modal-header {
@@ -297,21 +306,22 @@ const formatFileSize = (bytes) => {
   justify-content: space-between;
   align-items: center;
   padding: 24px 24px 16px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .modal-header h2 {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #111827;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: -0.02em;
 }
 
 .close-btn {
-  background: none;
-  border: none;
-  font-size: 28px;
-  color: #6b7280;
+  background: var(--color-surface-strong);
+  border: 1px solid var(--color-border-strong);
+  font-size: 1.3rem;
+  color: var(--color-text-soft);
   cursor: pointer;
   padding: 0;
   width: 32px;
@@ -319,17 +329,18 @@ const formatFileSize = (bytes) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  transition: all 0.2s;
+  border-radius: 8px;
+  transition: all 0.18s;
 }
 
 .close-btn:hover:not(:disabled) {
-  background: #f3f4f6;
-  color: #111827;
+  background: var(--color-surface-subtle);
+  border-color: var(--color-border-glow);
+  color: var(--color-text);
 }
 
 .close-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -349,28 +360,29 @@ const formatFileSize = (bytes) => {
 
 .drop-zone {
   width: 100%;
-  border: 2px dashed #d1d5db;
-  border-radius: 12px;
+  border: 1.5px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
   padding: 40px 20px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s;
-  background: #fafafa;
+  background: var(--color-surface-subtle);
 }
 
 .drop-zone:hover {
-  border-color: #667eea;
-  background: #f9fafb;
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 
 .drop-zone.drag-over {
-  border-color: #667eea;
-  background: #eef2ff;
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  box-shadow: 0 0 24px rgba(61, 126, 255, 0.15);
 }
 
 .drop-zone.has-file {
-  border-color: #10b981;
-  background: #f0fdf4;
+  border-color: rgba(13, 217, 142, 0.4);
+  background: var(--color-positive-soft);
   padding: 20px;
 }
 
@@ -382,25 +394,25 @@ const formatFileSize = (bytes) => {
 }
 
 .upload-icon {
-  font-size: 48px;
-  opacity: 0.6;
+  font-size: 40px;
+  opacity: 0.55;
 }
 
 .drop-text {
   margin: 0;
-  color: #374151;
-  font-size: 14px;
+  color: var(--color-text-soft);
+  font-size: 0.875rem;
 }
 
 .drop-text strong {
-  color: #667eea;
-  font-weight: 600;
+  color: var(--color-primary-dark);
+  font-weight: 700;
 }
 
 .file-hint {
   margin: 0;
-  color: #6b7280;
-  font-size: 12px;
+  color: var(--color-text-faint);
+  font-size: 0.75rem;
 }
 
 .file-selected {
@@ -411,15 +423,16 @@ const formatFileSize = (bytes) => {
 }
 
 .file-icon {
-  width: 48px;
-  height: 48px;
-  background: #10b981;
-  color: white;
+  width: 44px;
+  height: 44px;
+  background: var(--color-positive-soft);
+  color: var(--color-positive);
+  border: 1px solid rgba(13, 217, 142, 0.3);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: bold;
   flex-shrink: 0;
 }
@@ -431,46 +444,48 @@ const formatFileSize = (bytes) => {
 
 .file-name {
   margin: 0 0 4px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #111827;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text);
   word-break: break-word;
 }
 
 .file-size {
   margin: 0;
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 0.75rem;
+  color: var(--color-text-soft);
 }
 
 .remove-file-btn {
-  width: 32px;
-  height: 32px;
-  background: #fee2e2;
-  color: #dc2626;
-  border: none;
+  width: 30px;
+  height: 30px;
+  background: var(--color-negative-soft);
+  color: var(--color-negative);
+  border: 1px solid rgba(255, 69, 96, 0.3);
   border-radius: 50%;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.18s;
   flex-shrink: 0;
 }
 
 .remove-file-btn:hover {
-  background: #fecaca;
+  border-color: var(--color-negative);
+  background: rgba(255, 69, 96, 0.2);
 }
 
 .error-message {
   width: 100%;
-  padding: 12px;
-  background: #fee2e2;
-  border: 1px solid #fecaca;
+  padding: 12px 14px;
+  background: var(--color-negative-soft);
+  border: 1px solid rgba(255, 69, 96, 0.28);
+  border-left: 3px solid var(--color-negative);
   border-radius: 8px;
-  color: #dc2626;
-  font-size: 14px;
+  color: var(--color-negative);
+  font-size: 0.83rem;
   text-align: center;
 }
 
@@ -483,12 +498,13 @@ const formatFileSize = (bytes) => {
 }
 
 .spinner {
-  width: 48px;
-  height: 48px;
-  border: 4px solid #e5e7eb;
-  border-top-color: #667eea;
+  width: 44px;
+  height: 44px;
+  border: 3px solid var(--color-border-strong);
+  border-top-color: var(--color-primary);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: spin 900ms linear infinite;
+  box-shadow: 0 0 14px rgba(61, 126, 255, 0.3);
 }
 
 @keyframes spin {
@@ -501,32 +517,33 @@ const formatFileSize = (bytes) => {
 
 .progress-status {
   margin: 0 0 12px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text);
   text-align: center;
 }
 
 .progress-bar {
   width: 100%;
-  height: 8px;
-  background: #e5e7eb;
-  border-radius: 4px;
+  height: 6px;
+  background: var(--color-border-strong);
+  border-radius: 99px;
   overflow: hidden;
   margin-bottom: 8px;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--gradient-primary);
   transition: width 0.3s ease;
-  border-radius: 4px;
+  border-radius: 99px;
+  box-shadow: 0 0 10px rgba(61, 126, 255, 0.4);
 }
 
 .progress-percent {
   margin: 0;
-  font-size: 14px;
-  color: #6b7280;
+  font-size: 0.8rem;
+  color: var(--color-text-soft);
   text-align: center;
 }
 
@@ -535,31 +552,33 @@ const formatFileSize = (bytes) => {
 }
 
 .error-icon {
-  font-size: 48px;
+  font-size: 40px;
   margin-bottom: 12px;
 }
 
 .error-text {
   margin: 0 0 16px 0;
-  color: #dc2626;
-  font-size: 14px;
+  color: var(--color-negative);
+  font-size: 0.875rem;
   text-align: center;
 }
 
 .retry-btn {
   padding: 10px 24px;
-  background: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
+  background: linear-gradient(135deg, #3d7eff, #5b6ef5);
+  color: #fff;
+  border: 1px solid var(--color-primary);
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  box-shadow: 0 0 16px rgba(61, 126, 255, 0.22);
+  transition: all 0.18s;
 }
 
 .retry-btn:hover {
-  background: #2563eb;
+  background: linear-gradient(135deg, #5090ff, #7280ff);
+  box-shadow: 0 0 24px rgba(61, 126, 255, 0.38);
   transform: translateY(-1px);
 }
 
@@ -572,13 +591,18 @@ const formatFileSize = (bytes) => {
 
 .discard-btn {
   padding: 10px 18px;
-  border: 1px solid #fecaca;
+  border: 1px solid rgba(255, 69, 96, 0.3);
   border-radius: 8px;
-  background: #fff;
-  color: #b91c1c;
-  font-size: 14px;
+  background: var(--color-negative-soft);
+  color: var(--color-negative);
+  font-size: 0.875rem;
   font-weight: 650;
   cursor: pointer;
+  transition: border-color 150ms, background 150ms;
+}
+
+.discard-btn:hover {
+  border-color: var(--color-negative);
 }
 
 .modal-footer {
@@ -586,42 +610,46 @@ const formatFileSize = (bytes) => {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px 24px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--color-border);
 }
 
 .btn-secondary,
 .btn-primary {
   padding: 10px 24px;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.18s;
 }
 
 .btn-secondary {
-  background: #f3f4f6;
-  color: #374151;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-strong);
+  color: var(--color-text-soft);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #e5e7eb;
+  border-color: var(--color-border-glow);
+  color: var(--color-text);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  border: 1px solid var(--color-primary);
+  background: linear-gradient(135deg, #3d7eff, #5b6ef5);
+  color: #fff;
+  box-shadow: 0 0 16px rgba(61, 126, 255, 0.22);
 }
 
 .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5090ff, #7280ff);
+  box-shadow: 0 0 26px rgba(61, 126, 255, 0.38);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
 .btn-primary:disabled,
 .btn-secondary:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none;
 }

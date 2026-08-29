@@ -110,7 +110,7 @@ const handleSelect = () => {
 
 <style scoped>
 .bank-card {
-  background: white;
+  background: var(--color-surface);
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
@@ -158,13 +158,13 @@ const handleSelect = () => {
   margin: 0 0 4px 0;
   font-size: 18px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .account-number {
   margin: 0;
   font-size: 14px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   font-family: 'Courier New', monospace;
 }
 
@@ -173,14 +173,14 @@ const handleSelect = () => {
   flex-direction: column;
   gap: 4px;
   padding: 16px 0;
-  border-top: 1px solid #e5e7eb;
-  border-bottom: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border);
   margin-bottom: 16px;
 }
 
 .balance-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -188,7 +188,7 @@ const handleSelect = () => {
 .balance-value {
   font-size: 28px;
   font-weight: 700;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .bank-change {
@@ -200,7 +200,7 @@ const handleSelect = () => {
 
 .change-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -226,9 +226,9 @@ const handleSelect = () => {
 .upload-btn {
   flex: 1;
   padding: 10px 16px;
-  background: #f3f4f6;
-  color: #374151;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface-strong);
+  color: var(--color-text-soft);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
@@ -238,7 +238,7 @@ const handleSelect = () => {
 
 .upload-btn:hover {
   background: #e5e7eb;
-  border-color: #d1d5db;
+  border: 1px solid var(--color-border-strong);
 }
 
 @media (max-width: 768px) {

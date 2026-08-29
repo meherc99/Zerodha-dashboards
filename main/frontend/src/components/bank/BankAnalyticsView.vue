@@ -183,8 +183,8 @@ watch(() => props.accountId, () => {
 
 .period-btn {
   padding: 8px 20px;
-  border: 2px solid #e5e7eb;
-  background: white;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
   border-radius: 8px;
   font-weight: 600;
   font-size: 14px;
@@ -254,7 +254,7 @@ watch(() => props.accountId, () => {
 }
 
 .chart-card {
-  background: white;
+  background: var(--color-surface);
   border-radius: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   overflow: hidden;
@@ -272,7 +272,7 @@ watch(() => props.accountId, () => {
   margin: 0 0 20px 0;
   font-size: 18px;
   font-weight: bold;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .stat-grid {
@@ -289,7 +289,7 @@ watch(() => props.accountId, () => {
 
 .stat-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -298,7 +298,7 @@ watch(() => props.accountId, () => {
 .stat-value {
   font-size: 20px;
   font-weight: bold;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .stat-value.positive {

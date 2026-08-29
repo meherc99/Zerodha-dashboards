@@ -147,7 +147,7 @@ const chartOptions = {
   position: relative;
   height: 300px;
   width: 100%;
-  background: white;
+  background: var(--color-surface);
   border-radius: 8px;
   padding: 16px;
 }

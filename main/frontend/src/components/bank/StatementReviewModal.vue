@@ -267,7 +267,7 @@ const formatDate = (dateString) => {
 }
 
 .modal-content {
-  background: white;
+  background: var(--color-surface);
   border-radius: 16px;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   width: 100%;
@@ -284,10 +284,10 @@ const formatDate = (dateString) => {
   justify-content: space-between;
   align-items: center;
   padding: 24px 24px 16px;
-  border-bottom: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   position: sticky;
   top: 0;
-  background: white;
+  background: var(--color-surface);
   z-index: 10;
 }
 
@@ -295,14 +295,14 @@ const formatDate = (dateString) => {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .close-btn {
   background: none;
   border: none;
   font-size: 28px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   cursor: pointer;
   padding: 0;
   width: 32px;
@@ -315,8 +315,8 @@ const formatDate = (dateString) => {
 }
 
 .close-btn:hover:not(:disabled) {
-  background: #f3f4f6;
-  color: #111827;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
 }
 
 .close-btn:disabled {
@@ -341,7 +341,7 @@ const formatDate = (dateString) => {
 .spinner {
   width: 48px;
   height: 48px;
-  border: 4px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-top-color: #667eea;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -354,7 +354,7 @@ const formatDate = (dateString) => {
 .loading-state p,
 .error-text {
   margin: 0;
-  color: #6b7280;
+  color: var(--color-text-soft);
   font-size: 16px;
 }
 
@@ -415,7 +415,7 @@ const formatDate = (dateString) => {
 }
 
 .warning-item {
-  background: white;
+  background: var(--color-surface);
   padding: 10px 12px;
   border-radius: 6px;
   font-size: 13px;
@@ -428,7 +428,7 @@ const formatDate = (dateString) => {
 }
 
 .warning-message {
-  color: #374151;
+  color: var(--color-text-soft);
 }
 
 .summary-section {
@@ -438,7 +438,7 @@ const formatDate = (dateString) => {
 }
 
 .summary-item {
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
   padding: 16px;
   border-radius: 8px;
   display: flex;
@@ -448,7 +448,7 @@ const formatDate = (dateString) => {
 
 .summary-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -456,7 +456,7 @@ const formatDate = (dateString) => {
 .summary-value {
   font-size: 20px;
   font-weight: 700;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .summary-value.debit {
@@ -469,7 +469,7 @@ const formatDate = (dateString) => {
 
 .table-container {
   overflow-x: auto;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
 }
 
@@ -480,7 +480,7 @@ const formatDate = (dateString) => {
 }
 
 .transactions-table thead {
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -490,18 +490,18 @@ const formatDate = (dateString) => {
   padding: 12px;
   text-align: left;
   font-weight: 600;
-  color: #374151;
-  border-bottom: 2px solid #e5e7eb;
+  color: var(--color-text-soft);
+  border: 1px solid var(--color-border);
   white-space: nowrap;
 }
 
 .transactions-table tbody tr {
-  border-bottom: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   transition: background 0.2s;
 }
 
 .transactions-table tbody tr:hover {
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
 }
 
 .transaction-row.low-confidence {
@@ -519,7 +519,7 @@ const formatDate = (dateString) => {
 .date-cell {
   font-family: 'Courier New', monospace;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   white-space: nowrap;
 }
 
@@ -534,17 +534,17 @@ const formatDate = (dateString) => {
 }
 
 .description-content > span {
-  color: #111827;
+  color: var(--color-text);
   word-break: break-word;
 }
 
 .note-input {
   width: 100%;
   padding: 6px 8px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--color-border-strong);
   border-radius: 4px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   font-style: italic;
   transition: all 0.2s;
 }
@@ -552,7 +552,7 @@ const formatDate = (dateString) => {
 .note-input:focus {
   outline: none;
   border-color: #667eea;
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
 }
 
 .amount-cell {
@@ -571,7 +571,7 @@ const formatDate = (dateString) => {
 }
 
 .amount-cell.balance {
-  color: #374151;
+  color: var(--color-text-soft);
 }
 
 .category-cell {
@@ -581,11 +581,11 @@ const formatDate = (dateString) => {
 .category-select {
   width: 100%;
   padding: 6px 8px;
-  border: 2px solid #d1d5db;
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
   font-size: 13px;
-  color: #374151;
-  background: white;
+  color: var(--color-text-soft);
+  background: var(--color-surface);
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -596,7 +596,7 @@ const formatDate = (dateString) => {
 }
 
 .category-select:hover {
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
 }
 
 .modal-footer {
@@ -604,10 +604,10 @@ const formatDate = (dateString) => {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px 24px;
-  border-top: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   position: sticky;
   bottom: 0;
-  background: white;
+  background: var(--color-surface);
 }
 
 .btn-secondary,
@@ -622,8 +622,8 @@ const formatDate = (dateString) => {
 }
 
 .btn-secondary {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--color-surface-strong);
+  color: var(--color-text-soft);
 }
 
 .btn-secondary:hover:not(:disabled) {

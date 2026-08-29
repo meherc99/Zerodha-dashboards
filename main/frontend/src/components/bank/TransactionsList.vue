@@ -359,7 +359,7 @@ onBeforeUnmount(() => {
 }
 
 .filters-bar {
-  background: white;
+  background: var(--color-surface);
   padding: 20px;
   border-radius: 8px;
   margin-bottom: 20px;
@@ -373,7 +373,7 @@ onBeforeUnmount(() => {
 .search-box input {
   width: 100%;
   padding: 10px 16px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 14px;
 }
@@ -391,10 +391,10 @@ onBeforeUnmount(() => {
 
 .filter-group select {
   padding: 10px 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 14px;
-  background: white;
+  background: var(--color-surface);
   cursor: pointer;
 }
 
@@ -411,7 +411,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  background: white;
+  background: var(--color-surface);
   border-radius: 12px;
   text-align: center;
 }
@@ -457,16 +457,16 @@ onBeforeUnmount(() => {
 .empty-state h3 {
   margin: 0 0 8px 0;
   font-size: 20px;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .empty-state p {
   margin: 0;
-  color: #6b7280;
+  color: var(--color-text-soft);
 }
 
 .table-container {
-  background: white;
+  background: var(--color-surface);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -478,8 +478,8 @@ onBeforeUnmount(() => {
 }
 
 .transactions-table thead {
-  background: #f9fafb;
-  border-bottom: 2px solid #e5e7eb;
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
 }
 
 .transactions-table th {
@@ -487,24 +487,24 @@ onBeforeUnmount(() => {
   text-align: left;
   font-size: 12px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--color-text-soft);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .transactions-table td {
   padding: 16px;
-  border-bottom: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   font-size: 14px;
 }
 
 .transactions-table tbody tr:hover {
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
 }
 
 .date-cell {
   white-space: nowrap;
-  color: #6b7280;
+  color: var(--color-text-soft);
 }
 
 .description-cell {
@@ -514,24 +514,24 @@ onBeforeUnmount(() => {
 .description-text {
   display: block;
   font-weight: 500;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .notes {
   display: block;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   margin-top: 4px;
 }
 
 .merchant-cell {
-  color: #6b7280;
+  color: var(--color-text-soft);
 }
 
 .category-badge {
   display: inline-block;
   padding: 4px 10px;
-  background: #eff6ff;
+  background: var(--color-primary-soft);
   color: #3b82f6;
   border-radius: 12px;
   font-size: 12px;
@@ -558,7 +558,7 @@ onBeforeUnmount(() => {
 
 .balance-cell {
   font-weight: 500;
-  color: #111827;
+  color: var(--color-text);
   white-space: nowrap;
 }
 
@@ -585,13 +585,13 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-top: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
 }
 
 .page-btn {
   padding: 8px 16px;
-  background: white;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
@@ -611,7 +611,7 @@ onBeforeUnmount(() => {
 
 .page-info {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--color-text-soft);
 }
 
 /* Modal Styles */
@@ -629,7 +629,7 @@ onBeforeUnmount(() => {
 }
 
 .modal-content {
-  background: white;
+  background: var(--color-surface);
   border-radius: 12px;
   padding: 24px;
   width: 90%;
@@ -639,7 +639,7 @@ onBeforeUnmount(() => {
 .modal-content h3 {
   margin: 0 0 20px 0;
   font-size: 18px;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .form-group {
@@ -651,14 +651,14 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
   font-size: 14px;
   font-weight: 500;
-  color: #374151;
+  color: var(--color-text-soft);
 }
 
 .form-group select,
 .form-group textarea {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 14px;
 }
@@ -694,8 +694,8 @@ onBeforeUnmount(() => {
 }
 
 .cancel-btn {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--color-surface-strong);
+  color: var(--color-text-soft);
 }
 
 .cancel-btn:hover {

@@ -192,7 +192,7 @@ const chartOptions = {
 
 <style scoped>
 .monthly-chart-wrapper {
-  background: white;
+  background: var(--color-surface);
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
@@ -205,14 +205,14 @@ const chartOptions = {
   align-items: center;
   justify-content: center;
   padding: 40px 20px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   gap: 12px;
 }
 
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-top-color: #3b82f6;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -228,7 +228,7 @@ const chartOptions = {
 }
 
 .summary-item {
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
   border-radius: 10px;
   padding: 14px 16px;
   display: flex;
@@ -244,7 +244,7 @@ const chartOptions = {
 
 .summary-label {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--color-text-soft);
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
@@ -252,7 +252,7 @@ const chartOptions = {
 .summary-value {
   font-size: 18px;
   font-weight: 700;
-  color: #111827;
+  color: var(--color-text);
 }
 
 /* Chart */
@@ -274,8 +274,8 @@ const chartOptions = {
 }
 
 .monthly-table th {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--color-surface-strong);
+  color: var(--color-text-soft);
   font-weight: 600;
   padding: 10px 12px;
   text-align: left;
@@ -289,16 +289,16 @@ const chartOptions = {
 .monthly-table td {
   padding: 9px 12px;
   border-top: 1px solid #f3f4f6;
-  color: #374151;
+  color: var(--color-text-soft);
 }
 
 .monthly-table tbody tr:hover td {
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
 }
 
-.income-cell  { color: #065f46; font-weight: 500; }
-.expense-cell { color: #991b1b; font-weight: 500; }
-.net-positive { color: #1d4ed8; font-weight: 600; }
+.income-cell  { color: var(--color-positive); font-weight: 500; }
+.expense-cell { color: var(--color-negative); font-weight: 500; }
+.net-positive { color: var(--color-primary-dark); font-weight: 600; }
 .net-negative { color: #b45309; font-weight: 600; }
 .muted        { color: #9ca3af; }
 </style>

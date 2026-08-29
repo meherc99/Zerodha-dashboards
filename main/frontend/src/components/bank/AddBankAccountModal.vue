@@ -245,7 +245,7 @@ watch(() => props.isOpen, (isOpen) => {
 }
 
 .modal-content {
-  background: white;
+  background: var(--color-surface);
   border-radius: 12px;
   width: 100%;
   max-width: 500px;
@@ -259,14 +259,14 @@ watch(() => props.isOpen, (isOpen) => {
   justify-content: space-between;
   align-items: center;
   padding: 24px 24px 16px 24px;
-  border-bottom: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
 }
 
 .modal-header h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .close-btn {
@@ -274,7 +274,7 @@ watch(() => props.isOpen, (isOpen) => {
   border: none;
   font-size: 32px;
   line-height: 1;
-  color: #6b7280;
+  color: var(--color-text-soft);
   cursor: pointer;
   padding: 0;
   width: 32px;
@@ -287,8 +287,8 @@ watch(() => props.isOpen, (isOpen) => {
 }
 
 .close-btn:hover {
-  background: #f3f4f6;
-  color: #111827;
+  background: var(--color-surface-strong);
+  color: var(--color-text);
 }
 
 .modal-body {
@@ -304,7 +304,7 @@ watch(() => props.isOpen, (isOpen) => {
   margin-bottom: 6px;
   font-size: 14px;
   font-weight: 500;
-  color: #374151;
+  color: var(--color-text-soft);
 }
 
 .required {
@@ -315,7 +315,7 @@ watch(() => props.isOpen, (isOpen) => {
 .form-group select {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
   font-size: 14px;
   transition: all 0.2s;
@@ -330,7 +330,7 @@ watch(() => props.isOpen, (isOpen) => {
 
 .form-group input:disabled,
 .form-group select:disabled {
-  background: #f9fafb;
+  background: var(--color-surface-subtle);
   cursor: not-allowed;
 }
 
@@ -344,7 +344,7 @@ watch(() => props.isOpen, (isOpen) => {
   position: absolute;
   left: 12px;
   font-weight: 500;
-  color: #6b7280;
+  color: var(--color-text-soft);
   pointer-events: none;
 }
 
@@ -355,7 +355,7 @@ watch(() => props.isOpen, (isOpen) => {
 .help-text {
   margin: 6px 0 0 0;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--color-text-soft);
 }
 
 .error-text {
@@ -370,7 +370,7 @@ watch(() => props.isOpen, (isOpen) => {
   background: #fef2f2;
   border: 1px solid #fecaca;
   border-radius: 6px;
-  color: #991b1b;
+  color: var(--color-negative);
   font-size: 14px;
   margin-bottom: 20px;
 }
@@ -381,7 +381,7 @@ watch(() => props.isOpen, (isOpen) => {
   justify-content: flex-end;
   margin-top: 24px;
   padding-top: 20px;
-  border-top: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
 }
 
 .cancel-btn,
@@ -396,8 +396,8 @@ watch(() => props.isOpen, (isOpen) => {
 }
 
 .cancel-btn {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--color-surface-strong);
+  color: var(--color-text-soft);
 }
 
 .cancel-btn:hover:not(:disabled) {
