@@ -23,11 +23,11 @@
 
       <div class="charts-grid">
         <ChartPanel
-          title="Stock allocation"
-          subtitle="Top positions by current market value"
+          title="Holdings distribution (Top 15)"
+          subtitle="Largest positions by current market value"
           :has-data="allocationData.labels.length > 0"
         >
-          <PieChart :data="allocationData" />
+          <BarChart :data="allocationData" horizontal />
         </ChartPanel>
 
         <ChartPanel
@@ -50,6 +50,15 @@
         :show-day-change="true"
         :show-member="true"
       />
+
+      <ChartPanel
+        title="Return map"
+        subtitle="Position-level unrealised return; colour and size both communicate direction"
+        :has-data="heatmapData.length > 0"
+        empty-title="No return data"
+      >
+        <HeatMap :data="heatmapData" />
+      </ChartPanel>
     </template>
   </div>
 </template>
@@ -62,25 +71,103 @@ import PortfolioSummary from '@/components/dashboard/PortfolioSummary.vue'
 import HoldingsTable from '@/components/dashboard/HoldingsTable.vue'
 import ChartPanel from '@/components/dashboard/ChartPanel.vue'
 import PieChart from '@/components/charts/PieChart.vue'
+import BarChart from '@/components/charts/BarChart.vue'
+import HeatMap from '@/components/charts/HeatMap.vue'
 
 const holdingsStore = useHoldingsStore()
 const equityHoldings = computed(() => holdingsStore.equityHoldings)
 
 const allocationData = computed(() => {
+  const OPUS_COLORS = [
+    '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316',
+    '#f59e0b', '#10b981', '#06b6d4', '#3b82f6', '#14b8a6',
+    '#a855f7', '#e879f9', '#fb7185', '#fbbf24', '#34d399',
+  ]
   const holdings = equityHoldings.value
     .slice()
     .sort((left, right) => Number(right.current_value || 0) - Number(left.current_value || 0))
-    .slice(0, 8)
+    .slice(0, 15)
 
   return {
     labels: holdings.map(holding => holding.tradingsymbol),
-    values: holdings.map(holding => Number(holding.current_value || 0))
+    values: holdings.map(holding => Number(holding.current_value || 0)),
+    colors: holdings.map((_, i) => OPUS_COLORS[i % OPUS_COLORS.length]),
   }
 })
 
+const heatmapData = computed(() =>
+  equityHoldings.value.map(h => ({
+    symbol: h.tradingsymbol,
+    value: Number(h.pnl_percentage || 0),
+    sector: h.sector,
+  }))
+)
+
+const SECTOR_COLORS = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316',
+  '#f59e0b', '#10b981', '#06b6d4', '#3b82f6', '#14b8a6',
+  '#a855f7', '#e879f9', '#fb7185', '#fbbf24', '#34d399',
+  '#22d3ee', '#60a5fa', '#c084fc',
+]
+
+// Normalize sector names from Zerodha/NSE to display-friendly categories
+const normalizeSector = sector => {
+  if (!sector) return 'Other'
+  const s = sector.trim()
+  const map = {
+    'Financial Services': 'Financial Services',
+    'Banks': 'Financial Services',
+    'Insurance': 'Financial Services',
+    'Capital Markets': 'Financial Services',
+    'Diversified Financials': 'Financial Services',
+    'Information Technology': 'Technology',
+    'IT': 'Technology',
+    'Software': 'Technology',
+    'Internet': 'Technology',
+    'Consumer Discretionary': 'Consumer',
+    'Consumer Goods': 'Consumer',
+    'Consumer Staples': 'Consumer',
+    'FMCG': 'Consumer',
+    'Retailing': 'Consumer',
+    'Automobile': 'Automobiles',
+    'Automobiles': 'Automobiles',
+    'Auto Components': 'Automobiles',
+    'Healthcare': 'Healthcare',
+    'Pharma': 'Healthcare',
+    'Pharmaceuticals': 'Healthcare',
+    'Biotechnology': 'Healthcare',
+    'Energy': 'Energy',
+    'Oil & Gas': 'Energy',
+    'Petroleum': 'Energy',
+    'Power': 'Energy',
+    'Metals': 'Metals & Mining',
+    'Metals & Mining': 'Metals & Mining',
+    'Steel': 'Metals & Mining',
+    'Mining': 'Metals & Mining',
+    'Infrastructure': 'Infrastructure',
+    'Construction': 'Infrastructure',
+    'Real Estate': 'Real Estate',
+    'Realty': 'Real Estate',
+    'Telecom': 'Telecom',
+    'Communication': 'Telecom',
+    'Media': 'Media & Entertainment',
+    'Entertainment': 'Media & Entertainment',
+    'Chemicals': 'Chemicals',
+    'Materials': 'Chemicals',
+    'Fertilisers': 'Chemicals',
+    'Agriculture': 'Agriculture',
+    'Agro Chemicals': 'Chemicals',
+    'Textiles': 'Textiles',
+    'Utilities': 'Utilities',
+    'Transport': 'Transport',
+    'Logistics': 'Transport',
+  }
+  return map[s] || s
+}
+
 const sectorData = computed(() => {
   const sectors = equityHoldings.value.reduce((totals, holding) => {
-    const sector = holding.sector || 'Uncategorised'
+    const sector = normalizeSector(holding.sector)
     totals[sector] = (totals[sector] || 0) + Number(holding.current_value || 0)
     return totals
   }, {})
@@ -89,6 +176,7 @@ const sectorData = computed(() => {
   return {
     labels: sorted.map(([sector]) => sector),
     values: sorted.map(([, value]) => value),
+    colors: sorted.map((_, i) => SECTOR_COLORS[i % SECTOR_COLORS.length]),
     label: 'Current value'
   }
 })
