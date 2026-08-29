@@ -199,6 +199,12 @@ def enrich_mf_holdings(holdings: List[dict]) -> List[dict]:
         holding['last_price'] = today_nav
         holding['current_value'] = qty * today_nav
 
+        # Populate human-readable fund name from mfapi meta
+        meta = data.get('meta', {})
+        scheme_name = meta.get('scheme_name') or meta.get('fund_house')
+        if scheme_name:
+            holding['scheme_name'] = str(scheme_name).strip()
+
         if yesterday_nav and yesterday_nav > 0:
             day_change_per_unit = today_nav - yesterday_nav
             holding['day_change'] = day_change_per_unit * qty

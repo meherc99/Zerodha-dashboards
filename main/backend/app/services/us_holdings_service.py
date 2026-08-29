@@ -71,6 +71,12 @@ class USHoldingsService:
         'purchase date': 'Purchase Date',
         'buy date': 'Purchase Date',
         'date': 'Purchase Date',
+        # Human-readable name columns (broker exports)
+        'security name': 'Security Name',
+        'company name': 'Security Name',
+        'company': 'Security Name',
+        'name': 'Security Name',
+        'description': 'Security Name',
     }
 
     @classmethod
@@ -191,6 +197,10 @@ class USHoldingsService:
                         row['Purchase Date']
                     )
 
+                security_name = None
+                if 'Security Name' in df.columns and pd.notna(row.get('Security Name')):
+                    security_name = str(row['Security Name']).strip() or None
+
                 seen_symbols.add(symbol)
                 holdings.append(
                     {
@@ -198,6 +208,7 @@ class USHoldingsService:
                         'quantity': quantity,
                         'average_price': average_price,
                         'purchase_date': purchase_date,
+                        'security_name': security_name,
                         'source_row': row_number,
                     }
                 )
@@ -256,11 +267,14 @@ class USHoldingsService:
             invested = quantity * average_price
             pnl = current_value - invested
 
+            # Prefer human-readable name so ISINs / opaque tickers are never shown raw.
+            display_name = data.get('security_name') or symbol
+
             holding = Holding(
                 account_id=account.id,
                 snapshot_id=snapshot.id,
                 holding_key=f'us_equity:US:{symbol}',
-                tradingsymbol=symbol[:100],
+                tradingsymbol=display_name[:100],
                 exchange='US',
                 instrument_type='us_equity',
                 market='US',
@@ -300,10 +314,13 @@ class USHoldingsService:
         if not us_holdings:
             return 0
 
-        symbols = sorted({
-            holding.tradingsymbol
-            for holding in us_holdings
-        })
+        # Extract the original ticker from holding_key ("us_equity:US:TICKER")
+        # rather than tradingsymbol, which may now be a human-readable name.
+        def _ticker(holding):
+            parts = (holding.holding_key or '').split(':')
+            return parts[-1] if len(parts) >= 3 else holding.tradingsymbol
+
+        symbols = sorted({_ticker(h) for h in us_holdings})
         prices = self.fetch_current_prices(symbols)
         unavailable = [
             symbol
@@ -329,7 +346,7 @@ class USHoldingsService:
 
         updated = 0
         for old in us_holdings:
-            quote = prices.get(old.tradingsymbol, {})
+            quote = prices.get(_ticker(old), {})
             last_price = _decimal(quote.get('current_price', old.last_price))
             quantity = _decimal(old.quantity)
             average_price = _decimal(old.average_price)

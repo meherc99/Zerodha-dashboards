@@ -194,7 +194,14 @@ class KiteService:
             logger.info("Fetched %s mutual-fund holdings", len(processed_holdings))
             # Deferred import avoids circular dependency through services/__init__.py
             from app.services.amfi_service import enrich_mf_holdings
-            return enrich_mf_holdings(processed_holdings)
+            enriched = enrich_mf_holdings(processed_holdings)
+            # Replace numeric scheme-code / raw ISIN tradingsymbol with the
+            # human-readable fund name so that the UI and DB show the name.
+            for h in enriched:
+                name = h.get('scheme_name')
+                if name and len(name) <= 100:
+                    h['tradingsymbol'] = name
+            return enriched
         except Exception:
             logger.error("Kite mutual-fund fetch failed", exc_info=True)
             raise
