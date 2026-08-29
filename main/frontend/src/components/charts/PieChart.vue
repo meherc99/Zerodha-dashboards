@@ -32,24 +32,21 @@ const props = defineProps({
   }
 })
 
+const OPUS_COLORS = [
+  '#3d7eff', '#8b5cf6', '#ec4899', '#ef4444', '#f97316',
+  '#f59e0b', '#10b981', '#06b6d4', '#3b82f6', '#14b8a6',
+  '#a855f7', '#e879f9', '#fb7185', '#fbbf24', '#34d399',
+  '#22d3ee', '#60a5fa', '#c084fc',
+]
+
 const chartData = computed(() => ({
   labels: props.data.labels || [],
   datasets: [{
     data: props.data.values || [],
-    backgroundColor: [
-      '#FF6384',
-      '#36A2EB',
-      '#FFCE56',
-      '#4BC0C0',
-      '#9966FF',
-      '#FF9F40',
-      '#FF6384',
-      '#C9CBCF',
-      '#4BC0C0',
-      '#FF9F40'
-    ],
-    borderWidth: 2,
-    borderColor: '#fff'
+    backgroundColor: props.data.colors || OPUS_COLORS,
+    borderWidth: 1,
+    borderColor: '#0b1628',
+    hoverOffset: 14,
   }]
 }))
 
@@ -62,17 +59,23 @@ const moneyFormatter = computed(() => new Intl.NumberFormat('en-IN', {
 const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
+  animation: { animateScale: true },
   plugins: {
     legend: {
       position: 'right',
       labels: {
-        boxWidth: 12,
-        font: {
-          size: 11
-        }
+        boxWidth: 11,
+        padding: 12,
+        color: '#6a94b8',
+        font: { size: 11 }
       }
     },
     tooltip: {
+      backgroundColor: '#060c18',
+      borderColor: '#162438',
+      borderWidth: 1,
+      titleColor: '#dde8f7',
+      bodyColor: '#6a94b8',
       callbacks: {
         label: (context) => {
           const label = context.label || ''

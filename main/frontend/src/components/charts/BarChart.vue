@@ -44,7 +44,7 @@ const chartData = computed(() => ({
   datasets: [{
     label: props.data.label || 'Value',
     data: props.data.values || [],
-    backgroundColor: props.data.colors || '#4f7df3',
+    backgroundColor: props.data.colors || '#3d7eff',
     borderRadius: 6,
   }]
 }))
@@ -63,15 +63,12 @@ const chartOptions = computed(() => ({
     legend: {
       display: false
     },
-    title: {
-      display: !!props.title,
-      text: props.title,
-      font: {
-        size: 14,
-        weight: 'bold'
-      }
-    },
     tooltip: {
+      backgroundColor: '#060c18',
+      borderColor: '#162438',
+      borderWidth: 1,
+      titleColor: '#dde8f7',
+      bodyColor: '#6a94b8',
       callbacks: {
         label: (context) => {
           return moneyFormatter.value.format(Number(context.raw || 0))
@@ -83,23 +80,23 @@ const chartOptions = computed(() => ({
     ? {
         x: {
           beginAtZero: true,
-          grid: { color: 'rgba(203, 213, 225, 0.35)' },
-          ticks: { callback: value => moneyFormatter.value.format(value) }
+          grid: { color: 'rgba(42, 53, 72, 0.8)' },
+          ticks: { color: '#3a5a78', callback: value => moneyFormatter.value.format(value) }
         },
         y: {
           grid: { display: false },
-          ticks: { color: '#5f6f82' }
+          ticks: { color: '#6a94b8' }
         }
       }
     : {
         x: {
           grid: { display: false },
-          ticks: { color: '#5f6f82' }
+          ticks: { color: '#6a94b8' }
         },
         y: {
           beginAtZero: true,
-          grid: { color: 'rgba(203, 213, 225, 0.35)' },
-          ticks: { callback: value => moneyFormatter.value.format(value) }
+          grid: { color: 'rgba(42, 53, 72, 0.8)' },
+          ticks: { color: '#3a5a78', callback: value => moneyFormatter.value.format(value) }
         }
       }
 }))

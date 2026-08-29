@@ -62,8 +62,8 @@ const chartData = computed(() => {
     datasets: [{
       label: 'Portfolio Value',
       data: values,
-      borderColor: '#246bfd',
-      backgroundColor: 'rgba(36, 107, 253, 0.10)',
+      borderColor: '#3d7eff',
+      backgroundColor: 'rgba(99, 102, 241, 0.12)',
       fill: true,
       tension: 0.4,
       pointRadius: 3,
@@ -95,17 +95,15 @@ const chartOptions = computed(() => ({
   plugins: {
     legend: {
       display: true,
-      position: 'top'
-    },
-    title: {
-      display: !!props.title,
-      text: props.title,
-      font: {
-        size: 14,
-        weight: 'bold'
-      }
+      position: 'top',
+      labels: { color: '#6a94b8', font: { size: 11 } }
     },
     tooltip: {
+      backgroundColor: '#060c18',
+      borderColor: '#162438',
+      borderWidth: 1,
+      titleColor: '#dde8f7',
+      bodyColor: '#6a94b8',
       callbacks: {
         label: (context) => {
           return `Value: ${moneyFormatter.value.format(context.parsed.y)}`
@@ -115,13 +113,14 @@ const chartOptions = computed(() => ({
   },
   scales: {
     x: {
-      grid: {
-        display: false
-      }
+      grid: { display: false },
+      ticks: { color: '#3a5a78' }
     },
     y: {
       beginAtZero: false,
+      grid: { color: 'rgba(42, 53, 72, 0.8)' },
       ticks: {
+        color: '#3a5a78',
         callback: (value) => compactMoneyFormatter.value.format(value)
       }
     }
