@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 
 from app.services.analytics_service import AnalyticsService
+from app.services.exchange_rate_service import ExchangeRateService
 from app.services.portfolio_service import PortfolioService
 from app.utils.auth import current_user_id, owned_account
 
@@ -178,3 +179,15 @@ def get_heatmap():
             )
         }
     )
+
+
+@analytics_bp.get('/exchange-rates')
+@jwt_required()
+def get_exchange_rates():
+    """Return live USD/INR and EUR/INR rates plus previous-day rates."""
+    try:
+        rates = ExchangeRateService().get_rates()
+        return jsonify(rates)
+    except Exception:
+        logger.error('Exchange rate fetch failed')
+        return jsonify({'error': 'Exchange rates temporarily unavailable'}), 502
