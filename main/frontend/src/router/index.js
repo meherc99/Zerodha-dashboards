@@ -50,6 +50,11 @@ const routes = [
         component: () => import('@/views/dashboard/USStocksTab.vue')
       },
       {
+        path: 'eu-stocks',
+        name: 'EUStocks',
+        component: () => import('@/views/dashboard/EUStocksTab.vue')
+      },
+      {
         path: 'fixed-deposits',
         name: 'FixedDeposits',
         component: () => import('@/views/dashboard/FixedDepositsTab.vue')

@@ -28,6 +28,7 @@ const navigation = [
   { to: '/dashboard/stocks', label: 'Indian stocks', icon: 'IN' },
   { to: '/dashboard/mutual-funds', label: 'Mutual funds', icon: 'MF' },
   { to: '/dashboard/us-stocks', label: 'US stocks', icon: 'US' },
+  { to: '/dashboard/eu-stocks', label: 'EU stocks', icon: 'EU' },
   { to: '/dashboard/fixed-deposits', label: 'Fixed deposits', icon: 'FD' },
   { to: '/dashboard/bank-balances', label: 'Bank balances', icon: '₹' }
 ]
