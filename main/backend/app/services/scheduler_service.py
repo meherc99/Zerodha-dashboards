@@ -103,6 +103,7 @@ class SchedulerService:
         synced = 0
         failed = 0
         snapshots = []
+        reauth_required = []
         encryptor = get_encryptor()
 
         for account in accounts:
@@ -117,6 +118,8 @@ class SchedulerService:
                         trigger=trigger,
                         encryptor=encryptor,
                     )
+                # Clear stale reauth flag on success
+                account.needs_reauth = False
                 snapshots.append(snapshot)
                 synced += 1
                 logger.info(
@@ -126,6 +129,8 @@ class SchedulerService:
                 )
             except TokenException as exc:
                 failed += 1
+                reauth_required.append(account.id)
+                account.needs_reauth = True
                 logger.error(
                     'Sync failed for account %s — Kite access token expired or invalid: %s',
                     account.id, exc,
@@ -161,6 +166,7 @@ class SchedulerService:
             'accounts_total': len(accounts),
             'accounts_succeeded': synced,
             'accounts_failed': failed,
+            'reauth_required': reauth_required,
             'status': (
                 'completed'
                 if failed == 0
