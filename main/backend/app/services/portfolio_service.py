@@ -326,6 +326,14 @@ class PortfolioService:
             )
             if currency
         }
+        # Normalize to the start of the UTC day so that multiple syncs on the
+        # same calendar day update a single authoritative row rather than
+        # scattering many intra-day rows.  The unique constraint
+        # (account_id, date, currency) then enforces exactly one data-point
+        # per account-day-currency combination.
+        ts_date = snapshot.snapshot_date.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         # An absent currency is a state transition, not "no update". Emit a
         # zero tombstone so family history stops carrying a sold/removed
         # position forever. Using every historical currency also repairs the
@@ -344,20 +352,39 @@ class PortfolioService:
                     'total_holdings': 0,
                 },
             )
-            db.session.add(
-                PortfolioTimeseries(
+            # Upsert: update the existing row for this day if present, otherwise
+            # insert a fresh one.  The no_autoflush block prevents SQLAlchemy
+            # from flushing pending holdings while we query, which would cause
+            # premature constraint checks.
+            with db.session.no_autoflush:
+                existing_ts = PortfolioTimeseries.query.filter_by(
                     account_id=snapshot.account_id,
-                    snapshot_id=snapshot.id,
-                    date=snapshot.snapshot_date,
-                    currency=currency_summary['currency'],
-                    total_value=currency_summary['current_value'],
-                    invested_value=currency_summary['total_investment'],
-                    pnl=currency_summary['total_pnl'],
-                    pnl_percentage=currency_summary['total_pnl_percentage'],
-                    day_change=currency_summary['day_change'],
-                    holdings_count=currency_summary['total_holdings'],
+                    date=ts_date,
+                    currency=currency,
+                ).first()
+            if existing_ts is not None:
+                existing_ts.snapshot_id = snapshot.id
+                existing_ts.total_value = currency_summary['current_value']
+                existing_ts.invested_value = currency_summary['total_investment']
+                existing_ts.pnl = currency_summary['total_pnl']
+                existing_ts.pnl_percentage = currency_summary['total_pnl_percentage']
+                existing_ts.day_change = currency_summary['day_change']
+                existing_ts.holdings_count = currency_summary['total_holdings']
+            else:
+                db.session.add(
+                    PortfolioTimeseries(
+                        account_id=snapshot.account_id,
+                        snapshot_id=snapshot.id,
+                        date=ts_date,
+                        currency=currency,
+                        total_value=currency_summary['current_value'],
+                        invested_value=currency_summary['total_investment'],
+                        pnl=currency_summary['total_pnl'],
+                        pnl_percentage=currency_summary['total_pnl_percentage'],
+                        day_change=currency_summary['day_change'],
+                        holdings_count=currency_summary['total_holdings'],
+                    )
                 )
-            )
 
         for sector in sectors:
             db.session.add(
