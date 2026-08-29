@@ -106,21 +106,24 @@ const handleLogout = async () => {
   min-height: 100vh;
 }
 
+/* ─── App Header ─────────────────────────────────── */
 .app-header {
   position: sticky;
   z-index: 50;
   top: 0;
   display: flex;
-  height: 68px;
+  height: 64px;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  border-bottom: 1px solid rgba(203, 213, 225, 0.8);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 4px 18px rgba(21, 34, 56, 0.035);
-  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(4, 12, 24, 0.88);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 4px 32px rgba(0,0,0,0.5);
 }
 
+/* ─── Brand ─────────────────────────────────────── */
 .brand {
   display: inline-flex;
   align-items: center;
@@ -130,27 +133,28 @@ const handleLogout = async () => {
 }
 
 .brand-mark {
+  position: relative;
   display: flex;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   align-items: flex-end;
   justify-content: center;
   gap: 3px;
-  padding: 8px;
-  border-radius: 11px;
-  background: linear-gradient(145deg, #246bfd, #1749ba);
-  box-shadow: 0 7px 16px rgba(36, 107, 253, 0.24);
+  padding: 7px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #3d7eff, #a78bfa);
+  box-shadow: 0 0 20px rgba(61, 126, 255, 0.38), 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
 .brand-mark span {
-  width: 4px;
+  width: 3.5px;
   border-radius: 3px 3px 1px 1px;
-  background: #fff;
+  background: rgba(255,255,255,0.92);
 }
 
-.brand-mark span:nth-child(1) { height: 8px; opacity: 0.7; }
-.brand-mark span:nth-child(2) { height: 13px; opacity: 0.85; }
-.brand-mark span:nth-child(3) { height: 18px; }
+.brand-mark span:nth-child(1) { height: 7px;  opacity: 0.65; }
+.brand-mark span:nth-child(2) { height: 12px; opacity: 0.82; }
+.brand-mark span:nth-child(3) { height: 17px; }
 
 .brand-copy {
   display: flex;
@@ -159,30 +163,38 @@ const handleLogout = async () => {
 }
 
 .brand-copy strong {
-  font-size: 0.94rem;
+  font-size: 0.92rem;
+  font-weight: 750;
   letter-spacing: -0.01em;
+  background: linear-gradient(90deg, var(--color-text), var(--color-primary-dark));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .brand-copy small {
   margin-top: 2px;
   color: var(--color-text-faint);
-  font-size: 0.67rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
 }
 
+/* ─── Navigation ─────────────────────────────────── */
 .nav-links {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .nav-link {
-  padding: 8px 12px;
+  padding: 7px 12px;
   border-radius: 9px;
   color: var(--color-text-soft);
-  font-size: 0.84rem;
-  font-weight: 700;
+  font-size: 0.83rem;
+  font-weight: 650;
   text-decoration: none;
   transition: color 160ms ease, background 160ms ease;
+  letter-spacing: 0.01em;
 }
 
 .nav-link:hover {
@@ -195,84 +207,100 @@ const handleLogout = async () => {
   color: var(--color-primary-dark);
 }
 
+/* ─── Privacy label ──────────────────────────────── */
 .privacy-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 0 7px 0 10px;
+  margin: 0 8px 0 12px;
   color: var(--color-text-faint);
-  font-size: 0.71rem;
+  font-size: 0.68rem;
   font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .privacy-label span {
   color: var(--color-positive);
-  font-size: 0.58rem;
+  font-size: 0.5rem;
+  text-shadow: 0 0 6px var(--color-positive);
 }
 
+/* ─── Profile button ─────────────────────────────── */
 .profile-button {
   display: inline-flex;
-  min-height: 40px;
+  min-height: 38px;
   align-items: center;
   gap: 8px;
-  padding: 4px 10px 4px 5px;
-  border: 1px solid var(--color-border);
+  padding: 4px 12px 4px 5px;
+  border: 1px solid var(--color-border-strong);
   border-radius: 999px;
-  background: var(--color-surface);
+  background: var(--color-surface-strong);
   color: var(--color-text-soft);
-  font-size: 0.78rem;
+  font-size: 0.77rem;
   font-weight: 700;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
 .profile-button:hover {
-  border-color: var(--color-border-strong);
-  background: var(--color-surface-subtle);
+  border-color: var(--color-border-glow);
+  background: var(--color-surface);
+  box-shadow: 0 0 12px rgba(61, 126, 255, 0.14);
+  color: var(--color-text);
 }
 
 .profile-avatar {
   display: grid;
-  width: 29px;
-  height: 29px;
+  width: 28px;
+  height: 28px;
   place-items: center;
   border-radius: 50%;
-  background: #14243d;
+  background: linear-gradient(135deg, #3d7eff, #a78bfa);
+  box-shadow: 0 0 10px rgba(61, 126, 255, 0.35);
   color: #fff;
-  font-size: 0.66rem;
+  font-size: 0.64rem;
+  font-weight: 800;
 }
 
+/* ─── Mobile menu button ─────────────────────────── */
 .menu-button {
   display: none;
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   align-items: center;
   justify-content: center;
   flex-direction: column;
   gap: 4px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
   border-radius: 10px;
-  background: var(--color-surface);
+  background: var(--color-surface-strong);
+  transition: border-color 160ms ease;
+}
+
+.menu-button:hover {
+  border-color: var(--color-border-glow);
 }
 
 .menu-button span {
-  width: 17px;
-  height: 2px;
+  width: 16px;
+  height: 1.5px;
   border-radius: 2px;
-  background: var(--color-text);
+  background: var(--color-text-soft);
 }
 
+/* ─── Main areas ─────────────────────────────────── */
 .main-content {
-  min-height: calc(100vh - 68px);
+  min-height: calc(100vh - 64px);
 }
 
 .auth-content {
   min-height: 100vh;
 }
 
-/* Notifications */
+/* ─── Notifications ──────────────────────────────── */
 .notifications {
   position: fixed;
   z-index: 2000;
-  top: 80px;
+  top: 76px;
   right: 18px;
   display: flex;
   width: min(380px, calc(100vw - 28px));
@@ -282,48 +310,44 @@ const handleLogout = async () => {
 
 .notification {
   padding: 12px 15px;
-  border: 1px solid var(--color-border);
-  border-radius: 11px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 12px;
   background: var(--color-surface);
   box-shadow: var(--shadow-md);
   color: var(--color-text);
-  font-size: 0.84rem;
+  font-size: 0.83rem;
   font-weight: 650;
   animation: slideIn 220ms ease;
+  backdrop-filter: blur(12px);
 }
 
 @keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
 }
 
 .notification.success {
-  border-left: 4px solid var(--color-positive);
+  border-left: 3px solid var(--color-positive);
   background: var(--color-positive-soft);
-  color: #056846;
+  color: var(--color-positive);
 }
 
 .notification.error {
-  border-left: 4px solid var(--color-negative);
+  border-left: 3px solid var(--color-negative);
   background: var(--color-negative-soft);
-  color: #8f2630;
+  color: var(--color-negative);
 }
 
 .notification.info {
-  border-left: 4px solid var(--color-primary);
+  border-left: 3px solid var(--color-primary);
   background: var(--color-primary-soft);
   color: var(--color-primary-dark);
 }
 
+/* ─── Responsive ─────────────────────────────────── */
 @media (max-width: 768px) {
   .app-header {
-    height: 62px;
+    height: 58px;
     padding: 0 14px;
   }
 
@@ -333,16 +357,17 @@ const handleLogout = async () => {
 
   .nav-links {
     position: absolute;
-    top: 61px;
+    top: 57px;
     right: 10px;
     left: 10px;
     display: none;
     align-items: stretch;
     flex-direction: column;
-    padding: 10px;
-    border: 1px solid var(--color-border);
+    padding: 8px;
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-md);
-    background: var(--color-surface);
+    background: rgba(6, 16, 30, 0.98);
+    backdrop-filter: blur(20px);
     box-shadow: var(--shadow-md);
   }
 
@@ -364,13 +389,15 @@ const handleLogout = async () => {
   }
 
   .main-content {
-    min-height: calc(100vh - 62px);
+    min-height: calc(100vh - 58px);
   }
 
   .notifications {
-    top: 72px;
+    top: 68px;
     right: 14px;
     left: 14px;
   }
 }
 </style>
+
+
