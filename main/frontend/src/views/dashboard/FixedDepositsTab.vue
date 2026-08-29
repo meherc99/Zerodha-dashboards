@@ -170,6 +170,14 @@
         >
           <BarChart :data="rateComparisonData" />
         </ChartPanel>
+
+        <ChartPanel
+          title="Average rate by bank"
+          subtitle="Average annual interest rate across all deposits per bank"
+          :has-data="avgRateByBankData.labels.length > 0"
+        >
+          <BarChart :data="avgRateByBankData" />
+        </ChartPanel>
       </div>
 
       <FixedDepositTable :deposits="fdHoldings" />
@@ -269,6 +277,24 @@ const rateComparisonData = computed(() => {
     labels: deposits.map(d => d.tradingsymbol || 'Bank'),
     values: deposits.map(d => parseRate(d)),
     label: 'Interest rate (%)'
+  }
+})
+
+const avgRateByBankData = computed(() => {
+  const bankTotals = fdHoldings.value.reduce((acc, h) => {
+    const bank = h.tradingsymbol || 'Unknown'
+    if (!acc[bank]) acc[bank] = { sum: 0, count: 0 }
+    acc[bank].sum += parseRate(h)
+    acc[bank].count += 1
+    return acc
+  }, {})
+  const sorted = Object.entries(bankTotals)
+    .map(([bank, { sum, count }]) => ({ bank, avg: sum / count }))
+    .sort((a, b) => b.avg - a.avg)
+  return {
+    labels: sorted.map(e => e.bank),
+    values: sorted.map(e => parseFloat(e.avg.toFixed(2))),
+    label: 'Avg interest rate (%)'
   }
 })
 
@@ -482,7 +508,7 @@ const formatFileSize = bytes => {
   height: 38px;
   place-items: center;
   border-radius: 10px;
-  background: #e8f1e9;
+  background: var(--color-positive-soft);
   color: #28713a;
   font-size: 0.65rem;
   font-weight: 850;
