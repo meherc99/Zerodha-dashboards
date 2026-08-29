@@ -9,6 +9,7 @@ from flask_jwt_extended import jwt_required
 
 from app.database import db
 from app.models import Account
+from app.services.eu_holdings_service import EUHoldingsService
 from app.services.fd_service import FDService
 from app.services.portfolio_service import PortfolioService
 from app.services.us_holdings_service import USHoldingsService
@@ -301,6 +302,93 @@ def refresh_us_prices():
     return jsonify(
         {
             'message': 'US price refresh finished',
+            'updated_count': updated,
+            'accounts_total': len(accounts),
+            'accounts_succeeded': succeeded,
+            'accounts_failed': failed,
+            'accounts_skipped': skipped,
+            'status': status,
+        }
+    ), (502 if status == 'failed' else 200)
+
+
+@holdings_bp.post('/eu/upload')
+@jwt_required()
+@user_rate_limit(max_requests=10, window_minutes=60)
+def upload_eu_holdings():
+    user_id = current_user_id()
+    account, error = _selected_account(user_id, request.form.get('account_id'))
+    if error:
+        return error
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'error': 'No file provided'}), 400
+
+    path = None
+    try:
+        path = _save_spreadsheet(upload)
+        service = EUHoldingsService()
+        parsed = service.parse_excel_file(path)
+        created = service.create_holdings(account, parsed, fetch_prices=True)
+        return jsonify(
+            {
+                'message': 'EU holdings uploaded successfully',
+                'count': len(created),
+                'holdings': [holding.to_dict() for holding in created],
+            }
+        ), 201
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        db.session.rollback()
+        logger.error('EU holdings import failed for account %s', account.id)
+        return jsonify({'error': 'Unable to import EU holdings'}), 500
+    finally:
+        _remove_spreadsheet(path)
+
+
+@holdings_bp.post('/eu/refresh-prices')
+@jwt_required()
+@user_rate_limit(max_requests=20, window_minutes=60)
+def refresh_eu_prices():
+    user_id = current_user_id()
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid JSON data'}), 400
+    unexpected = sorted(set(data) - {'account_id'})
+    if unexpected:
+        return jsonify({'error': f'Unsupported field: {unexpected[0]}'}), 400
+    accounts, error = _refresh_accounts(user_id, data.get('account_id'))
+    if error:
+        return error
+    service = EUHoldingsService()
+    updated = succeeded = failed = skipped = 0
+    for account in accounts:
+        try:
+            account_updates = service.refresh_prices(account)
+            updated += account_updates
+            if account_updates:
+                succeeded += 1
+            else:
+                skipped += 1
+        except Exception:
+            db.session.rollback()
+            failed += 1
+            logger.error('EU price refresh failed for account %s', account.id)
+    if failed and not succeeded:
+        status = 'failed'
+    elif failed:
+        status = 'partial'
+    elif succeeded:
+        status = 'completed'
+    else:
+        status = 'no_holdings'
+    return jsonify(
+        {
+            'message': 'EU price refresh finished',
             'updated_count': updated,
             'accounts_total': len(accounts),
             'accounts_succeeded': succeeded,
