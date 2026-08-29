@@ -29,6 +29,7 @@ export const useHoldingsStore = defineStore('holdings', {
     portfolioHistory: [],
     sectorBreakdown: [],
     performanceMetrics: null,
+    exchangeRates: null,
     loading: false,
     error: null,
     analyticsError: null,
@@ -47,6 +48,9 @@ export const useHoldingsStore = defineStore('holdings', {
     usHoldings: (state) =>
       state.holdings.filter(h => h.instrument_type === 'us_equity'),
 
+    euHoldings: (state) =>
+      state.holdings.filter(h => h.instrument_type === 'eu_equity'),
+
     fdHoldings: (state) =>
       state.holdings.filter(h => h.instrument_type === 'fd'),
 
@@ -58,6 +62,9 @@ export const useHoldingsStore = defineStore('holdings', {
 
     usSummary: (state) =>
       summarizeHoldings(state.holdings.filter(h => h.instrument_type === 'us_equity')),
+
+    euSummary: (state) =>
+      summarizeHoldings(state.holdings.filter(h => h.instrument_type === 'eu_equity')),
 
     fdSummary: (state) => {
       const fds = state.holdings.filter(h => h.instrument_type === 'fd')
@@ -451,6 +458,68 @@ export const useHoldingsStore = defineStore('holdings', {
       }
     },
 
+    async uploadEUHoldings(file, accountId) {
+      this.loading = true
+      this.error = null
+      try {
+        const response = await api.uploadEUHoldings(file, accountId)
+        return response.data
+      } catch (error) {
+        this.error = error.response?.data?.error || 'Failed to upload file'
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async refreshEUPrices(accountId = null) {
+      const request = this.beginPortfolioRequest(accountId)
+      this.loading = true
+      try {
+        const response = await api.refreshEUPrices(accountId, {
+          signal: request.signal
+        })
+        if (!this.isPortfolioRequestCurrent(request)) return null
+        const result = response.data
+
+        if (accountId) {
+          await this.fetchHoldings(accountId, {}, request)
+        } else {
+          await this.fetchAggregatedHoldings(request)
+        }
+        if (!this.isPortfolioRequestCurrent(request)) return null
+
+        if (
+          result.status === 'failed'
+          || result.status === 'no_holdings'
+          || Number(result.updated_count || 0) === 0
+        ) {
+          const message = result.status === 'no_holdings'
+            ? 'No EU holdings were available to refresh.'
+            : 'No EU prices were updated.'
+          const refreshError = new Error(message)
+          refreshError.refreshResult = result
+          throw refreshError
+        }
+        return result
+      } catch (error) {
+        if (
+          !this.isPortfolioRequestCurrent(request)
+          || isCanceledRequest(error)
+        ) return null
+        this.error = (
+          error.refreshResult
+            ? error.message
+            : error.response?.data?.error || 'Failed to refresh prices'
+        )
+        throw error
+      } finally {
+        if (this.isPortfolioRequestCurrent(request)) {
+          this.loading = false
+        }
+      }
+    },
+
     async uploadFDHoldings(file, accountId) {
       this.loading = true
       this.error = null
@@ -491,6 +560,18 @@ export const useHoldingsStore = defineStore('holdings', {
         if (this.isPortfolioRequestCurrent(request)) {
           this.loading = false
         }
+      }
+    },
+
+    async fetchExchangeRates() {
+      try {
+        const response = await api.getExchangeRates()
+        this.exchangeRates = response.data
+        return response.data
+      } catch (error) {
+        // Non-fatal — UI falls back to placeholder rates
+        this.exchangeRates = null
+        return null
       }
     },
 

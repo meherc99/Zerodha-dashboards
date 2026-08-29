@@ -179,6 +179,31 @@ export const api = {
     }, options)
   },
 
+  // EU Holdings
+  uploadEUHoldings(file, accountId) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('account_id', accountId)
+
+    return apiClient.post('/holdings/eu/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 60000
+    })
+  },
+
+  refreshEUPrices(accountId = null, options = {}) {
+    return apiClient.post('/holdings/eu/refresh-prices', {
+      account_id: accountId
+    }, options)
+  },
+
+  // Exchange Rates
+  getExchangeRates(options = {}) {
+    return apiClient.get('/analytics/exchange-rates', options)
+  },
+
   // Fixed Deposits
   uploadFDHoldings(file, accountId) {
     const formData = new FormData()
