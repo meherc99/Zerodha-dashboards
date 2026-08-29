@@ -12,7 +12,7 @@ from cryptography.fernet import Fernet
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
-HEAD_REVISION = "b15a7e4c2d90"
+HEAD_REVISION = "855036219916"
 LEGACY_REVISION = "b1f00545dd90"
 ENCRYPTION_REVISION = "e82b91a7c4d6"
 TEST_ENCRYPTION_KEY = Fernet.generate_key().decode()
