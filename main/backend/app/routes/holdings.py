@@ -37,7 +37,7 @@ SORT_FIELDS = {
     'day_change',
     'day_change_percentage',
 }
-INSTRUMENT_TYPES = {'equity', 'mf', 'us_equity', 'fd'}
+INSTRUMENT_TYPES = {'equity', 'mf', 'us_equity', 'eu_equity', 'fd'}
 
 
 def _selected_account(user_id, value, *, required=True):
