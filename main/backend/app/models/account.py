@@ -13,9 +13,9 @@ class Account(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     account_name = db.Column(db.String(100), nullable=False)
 
-    # Encrypted credentials
-    api_key_encrypted = db.Column(db.Text, nullable=False)
-    api_secret_encrypted = db.Column(db.Text, nullable=False)
+    # Encrypted credentials (nullable when Kite Connect is not configured)
+    api_key_encrypted = db.Column(db.Text, nullable=True)
+    api_secret_encrypted = db.Column(db.Text, nullable=True)
     access_token_encrypted = db.Column(db.Text)
     request_token_encrypted = db.Column(db.Text)
 
@@ -60,6 +60,7 @@ class Account(db.Model):
             'account_name': self.account_name,
             'is_active': self.is_active,
             'needs_reauth': bool(self.needs_reauth),
+            'has_kite_credentials': bool(self.api_key_encrypted and self.api_secret_encrypted),
             'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
