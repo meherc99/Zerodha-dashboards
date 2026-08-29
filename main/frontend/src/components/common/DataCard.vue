@@ -95,53 +95,78 @@ const changeIcon = computed(() => {
 </script>
 
 <style scoped>
+/* ─── Base card ─────────────────────────────────── */
 .data-card {
   position: relative;
   min-width: 0;
-  padding: 18px;
+  padding: 20px;
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-card);
   text-align: left;
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
 }
 
+/* top-edge glow line */
+.data-card::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--card-top-line, linear-gradient(90deg, transparent, rgba(61, 126, 255, 0.4), transparent));
+  content: "";
+  opacity: 0.7;
+}
+
+/* subtle radial highlight */
 .data-card::after {
   position: absolute;
-  width: 82px;
-  height: 82px;
-  top: -38px;
-  right: -32px;
+  width: 100px;
+  height: 100px;
+  top: -40px;
+  right: -28px;
   border-radius: 50%;
-  background: var(--card-accent, #edf2f7);
+  background: var(--card-accent, rgba(61, 126, 255, 0.07));
   content: "";
-  opacity: 0.55;
+  pointer-events: none;
+  filter: blur(18px);
 }
 
+/* ─── Tone variants ──────────────────────────────── */
 .data-card.primary {
-  --card-accent: #dce7ff;
+  --card-accent:    rgba(61, 126, 255, 0.14);
+  --card-top-line: linear-gradient(90deg, transparent, rgba(61, 126, 255, 0.6), transparent);
+  border-color: rgba(61, 126, 255, 0.22);
 }
 
 .data-card.positive {
-  --card-accent: #d5f3e7;
+  --card-accent:    rgba(13, 217, 142, 0.14);
+  --card-top-line: linear-gradient(90deg, transparent, rgba(13, 217, 142, 0.55), transparent);
+  border-color: rgba(13, 217, 142, 0.2);
 }
 
 .data-card.violet {
-  --card-accent: #e8defe;
+  --card-accent:    rgba(167, 139, 250, 0.14);
+  --card-top-line: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.55), transparent);
+  border-color: rgba(167, 139, 250, 0.22);
 }
 
+/* ─── Interactive ────────────────────────────────── */
 .data-card.clickable {
   cursor: pointer;
 }
 
 .data-card.clickable:hover {
-  border-color: var(--color-border-strong);
-  box-shadow: 0 9px 24px rgba(21, 34, 56, 0.08);
+  border-color: var(--color-border-glow);
+  box-shadow: var(--shadow-card), var(--shadow-glow);
   transform: translateY(-2px);
 }
 
+/* ─── Inner layout ───────────────────────────────── */
 .card-header {
   display: flex;
   align-items: center;
@@ -152,9 +177,9 @@ const changeIcon = computed(() => {
 .card-header h3 {
   margin: 0;
   color: var(--color-text-soft);
-  font-size: 0.69rem;
+  font-size: 0.67rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -162,69 +187,86 @@ const changeIcon = computed(() => {
   position: relative;
   z-index: 1;
   display: grid;
-  width: 27px;
-  height: 27px;
-  flex: 0 0 27px;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
   place-items: center;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--color-surface-strong);
   color: var(--color-primary-dark);
-  font-size: 0.63rem;
+  font-size: 0.62rem;
   font-weight: 850;
+  transition: box-shadow 200ms ease;
+}
+
+.data-card.primary .card-icon {
+  border-color: rgba(61, 126, 255, 0.35);
+  background: rgba(61, 126, 255, 0.12);
+  color: var(--color-primary-dark);
+}
+
+.data-card.positive .card-icon {
+  border-color: rgba(13, 217, 142, 0.3);
+  background: rgba(13, 217, 142, 0.1);
+  color: var(--color-positive);
 }
 
 .card-body {
-  margin-top: 13px;
+  margin-top: 14px;
 }
 
+/* ─── Value display ──────────────────────────────── */
 .value {
   overflow: hidden;
   color: var(--color-text);
-  font-size: clamp(1.35rem, 2.2vw, 1.78rem);
+  font-size: clamp(1.3rem, 2.2vw, 1.72rem);
   font-variant-numeric: tabular-nums;
-  font-weight: 780;
-  letter-spacing: -0.035em;
+  font-weight: 760;
+  letter-spacing: -0.04em;
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.value.positive {
-  color: var(--color-positive);
-}
+.value.positive { color: var(--color-positive); }
+.value.negative { color: var(--color-negative); }
 
-.value.negative {
-  color: var(--color-negative);
-}
-
+/* ─── Change badge ───────────────────────────────── */
 .change {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   margin-top: 8px;
-  font-size: 0.75rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.74rem;
   font-weight: 750;
 }
 
 .change.positive {
   color: var(--color-positive);
+  background: var(--color-positive-soft);
 }
 
 .change.negative {
   color: var(--color-negative);
+  background: var(--color-negative-soft);
 }
 
 .change-icon {
-  font-size: 16px;
+  font-size: 13px;
+  line-height: 1;
 }
 
+/* ─── Subtitle ───────────────────────────────────── */
 .subtitle {
-  margin: 7px 0 0;
+  margin: 8px 0 0;
   overflow: hidden;
   color: var(--color-text-faint);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: 0.02em;
 }
 </style>
