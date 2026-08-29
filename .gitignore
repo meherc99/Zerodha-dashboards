@@ -1,17 +1,26 @@
-# Python
+# Python bytecode and extensions
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
 *.so
+
+# Python packaging and build artifacts
+.Python
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg
 *.egg-info/
-dist/
-build/
-eggs/
-parts/
-var/
-sdist/
-wheels/
 *.egg-link
 .installed.cfg
 MANIFEST
@@ -25,52 +34,43 @@ ENV/
 env.bak/
 venv.bak/
 
-# Python testing
+# Python tooling caches and reports
 .pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
 .tox/
 .nox/
-coverage.xml
-*.cover
-nosetests.xml
-test-results/
-
-# Python misc
-*.log
-*.pot
-*.pyc
 .mypy_cache/
-.dmypy.json
-dmypy.json
 .pyre/
 .pytype/
-*.pyo
+.dmypy.json
+dmypy.json
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+nosetests.xml
+test-results/
+*.cover
 
-# Jupyter Notebooks
+# Logs
+*.log
+
+# Jupyter notebooks
 .ipynb_checkpoints
 *.ipynb
 
-# Node.js
+# Node / frontend dependencies and outputs
 node_modules/
+.pnpm-store/
+dist-ssr/
+*.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-.pnpm-store/
-
-# Node build outputs
-dist/
-dist-ssr/
-*.local
-
-# Node testing
 coverage/
 
-# Environment variables
-.env
+# Environment-specific local files
 .env.local
 .env.*.local
 .env.development.local
@@ -85,15 +85,28 @@ coverage/
 *.njsproj
 *.sln
 *.sw?
+*.swp
+*.swo
+*~
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# Database
+# Databases
+*.db
 *.sqlite
 *.sqlite3
-*.db
 
 # Secrets / keys
 *.pem
 *.key
 secrets.json
+.claude
+
+# Worktrees directory
+.worktrees/
+
+# Uploaded bank statement PDFs
+uploads/bank_statements/*
+!uploads/bank_statements/.gitkeep
