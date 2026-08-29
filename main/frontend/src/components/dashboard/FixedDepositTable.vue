@@ -425,7 +425,7 @@ td small {
 .progress-bar {
   width: 64px;
   height: 6px;
-  background: var(--color-border, #e5e7eb);
+  background: var(--color-border-strong);
   border-radius: 3px;
   overflow: hidden;
   flex-shrink: 0;

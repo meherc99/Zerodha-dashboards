@@ -324,7 +324,7 @@ onMounted(() => {
 
 .add-bank-btn {
   padding: 12px 24px;
-  background: white;
+  background: var(--color-surface);
   color: #667eea;
   border: none;
   border-radius: 8px;
@@ -353,7 +353,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  background: white;
+  background: var(--color-surface);
   border-radius: 12px;
   text-align: center;
 }
@@ -361,7 +361,7 @@ onMounted(() => {
 .spinner {
   width: 40px;
   height: 40px;
-  border: 4px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-top-color: #3b82f6;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -375,7 +375,7 @@ onMounted(() => {
 .loading-state p,
 .error-state p {
   margin: 0;
-  color: #6b7280;
+  color: var(--color-text-soft);
   font-size: 16px;
 }
 
@@ -404,12 +404,12 @@ onMounted(() => {
 .empty-state h3 {
   margin: 0 0 8px 0;
   font-size: 20px;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .empty-state p {
   margin: 0 0 24px 0;
-  color: #6b7280;
+  color: var(--color-text-soft);
   font-size: 14px;
 }
 
@@ -432,7 +432,7 @@ onMounted(() => {
 }
 
 .bank-detail-view {
-  background: white;
+  background: var(--color-surface);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -440,7 +440,7 @@ onMounted(() => {
 
 .bank-header {
   padding: 24px;
-  border-bottom: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
 }
 
 .back-btn {
@@ -457,19 +457,19 @@ onMounted(() => {
 }
 
 .back-btn:hover {
-  background: #eff6ff;
+  background: var(--color-primary-soft);
 }
 
 .bank-info h2 {
   margin: 0 0 4px 0;
   font-size: 24px;
-  color: #111827;
+  color: var(--color-text);
 }
 
 .bank-info p {
   margin: 0;
   font-size: 14px;
-  color: #6b7280;
+  color: var(--color-text-soft);
 }
 
 .bank-heading-row {
@@ -481,19 +481,24 @@ onMounted(() => {
 
 .delete-bank-btn {
   padding: 8px 12px;
-  border: 1px solid #fecaca;
-  border-radius: 7px;
-  background: #fff;
-  color: #b91c1c;
-  font-size: 13px;
+  border: 1px solid rgba(255, 69, 96, 0.3);
+  border-radius: 8px;
+  background: var(--color-negative-soft);
+  color: var(--color-negative);
+  font-size: 0.8rem;
   font-weight: 650;
   cursor: pointer;
+  transition: border-color 150ms;
+}
+
+.delete-bank-btn:hover {
+  border-color: var(--color-negative);
 }
 
 .tab-navigation {
   display: flex;
   gap: 0;
-  border-bottom: 2px solid #e5e7eb;
+  border-bottom: 1px solid var(--color-border);
   padding: 0 24px;
 }
 
@@ -504,7 +509,7 @@ onMounted(() => {
   border-bottom: 3px solid transparent;
   font-size: 15px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--color-text-soft);
   cursor: pointer;
   transition: all 0.2s;
   margin-bottom: -2px;

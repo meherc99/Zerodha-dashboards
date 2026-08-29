@@ -495,8 +495,8 @@ const accountColor = name => {
   font-weight: 700;
   font-size: 0.75rem;
 }
-.pct-pill.positive { background: #dcfce7; color: #166534; }
-.pct-pill.negative { background: #fee2e2; color: #991b1b; }
+.pct-pill.positive { background: var(--color-positive-soft); color: var(--color-positive); }
+.pct-pill.negative { background: var(--color-negative-soft); color: var(--color-negative); }
 .pct-pill.neutral  { background: var(--color-bg); color: var(--color-text-faint); }
 .pct-pill.sm { font-size: 0.7rem; padding: 1px 6px; }
 

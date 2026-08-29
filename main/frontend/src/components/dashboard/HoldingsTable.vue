@@ -550,7 +550,7 @@ const quoteMeta = holding => {
 }
 
 .holdings-table tbody tr:hover {
-  background: #fbfcfe;
+  background: var(--color-surface-subtle);
 }
 
 .symbol-cell {
@@ -601,13 +601,13 @@ const quoteMeta = holding => {
 }
 
 .type-badge.mf {
-  background: #f1edff;
-  color: #6940b6;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 
 .type-badge.us_equity {
-  background: #e9f8f5;
-  color: #08735b;
+  background: var(--color-positive-soft);
+  color: var(--color-positive);
 }
 
 .type-badge.fd {

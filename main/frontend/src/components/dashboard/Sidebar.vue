@@ -36,44 +36,61 @@ const navigation = [
 <style scoped>
 .sidebar {
   position: sticky;
-  top: 68px;
+  top: 64px;
   display: flex;
-  width: 228px;
-  height: calc(100vh - 68px);
-  flex: 0 0 228px;
+  width: 220px;
+  height: calc(100vh - 64px);
+  flex: 0 0 220px;
   flex-direction: column;
-  padding: 24px 14px 18px;
+  padding: 22px 12px 16px;
   border-right: 1px solid var(--color-border);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(4, 12, 24, 0.85);
+  backdrop-filter: blur(16px);
 }
 
+/* ─── Section label ──────────────────────────────── */
 .sidebar-label {
-  margin: 0 10px 9px;
+  margin: 0 8px 10px;
   color: var(--color-text-faint);
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
 }
 
+/* ─── Nav ────────────────────────────────────────── */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
-  min-height: 43px;
-  padding: 8px 10px;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 10px;
   border-radius: 10px;
   color: var(--color-text-soft);
   text-decoration: none;
-  font-size: 0.83rem;
-  font-weight: 700;
-  transition: color 160ms ease, background 160ms ease;
+  font-size: 0.82rem;
+  font-weight: 650;
+  transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  position: relative;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2.5px;
+  border-radius: 99px;
+  background: var(--color-primary);
+  opacity: 0;
+  transition: opacity 160ms ease;
 }
 
 .nav-item:hover {
@@ -84,51 +101,61 @@ const navigation = [
 .nav-item.router-link-active {
   background: var(--color-primary-soft);
   color: var(--color-primary-dark);
+  box-shadow: inset 0 0 16px rgba(61, 126, 255, 0.06);
 }
 
+.nav-item.router-link-active::before {
+  opacity: 1;
+}
+
+/* ─── Icon ───────────────────────────────────────── */
 .icon {
   display: grid;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
   place-items: center;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: var(--color-surface);
-  color: var(--color-text-soft);
-  font-size: 0.61rem;
+  background: var(--color-surface-strong);
+  color: var(--color-text-faint);
+  font-size: 0.58rem;
   font-weight: 850;
   letter-spacing: -0.02em;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
 }
 
 .router-link-active .icon {
-  border-color: #c5d5ff;
-  background: #fff;
-  color: var(--color-primary);
+  border-color: rgba(61, 126, 255, 0.4);
+  background: rgba(61, 126, 255, 0.14);
+  color: var(--color-primary-dark);
+  box-shadow: 0 0 10px rgba(61, 126, 255, 0.15);
 }
 
+/* ─── Footer note ────────────────────────────────── */
 .sidebar-note {
   display: flex;
   align-items: flex-start;
   gap: 9px;
   margin-top: auto;
-  padding: 12px;
+  padding: 11px;
   border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: var(--color-surface);
+  background: linear-gradient(135deg, var(--color-surface-strong), var(--color-surface));
 }
 
 .note-icon {
   display: grid;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
   place-items: center;
   border-radius: 50%;
   background: var(--color-positive-soft);
   color: var(--color-positive);
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 900;
+  box-shadow: 0 0 8px rgba(13, 217, 142, 0.25);
 }
 
 .sidebar-note div {
@@ -137,29 +164,31 @@ const navigation = [
 }
 
 .sidebar-note strong {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
+  color: var(--color-text);
 }
 
 .sidebar-note div span {
   margin-top: 2px;
   color: var(--color-text-faint);
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   line-height: 1.45;
 }
 
+/* ─── Mobile ─────────────────────────────────────── */
 @media (max-width: 768px) {
   .sidebar {
     position: sticky;
     z-index: 30;
-    top: 62px;
+    top: 58px;
     width: 100%;
     height: auto;
     flex-basis: auto;
     border-right: none;
     border-bottom: 1px solid var(--color-border);
-    padding: 8px 10px;
-    background: rgba(255, 255, 255, 0.96);
-    backdrop-filter: blur(12px);
+    padding: 7px 10px;
+    background: rgba(4, 12, 24, 0.97);
+    backdrop-filter: blur(20px);
   }
 
   .sidebar-label,
@@ -169,25 +198,27 @@ const navigation = [
 
   .sidebar-nav {
     flex-direction: row;
-    gap: 5px;
+    gap: 4px;
     overflow-x: auto;
     scrollbar-width: none;
   }
 
+  .nav-item::before { display: none; }
+
   .nav-item {
     flex-shrink: 0;
-    min-height: 39px;
-    gap: 7px;
+    min-height: 38px;
+    gap: 6px;
     padding: 6px 9px;
-    font-size: 0.75rem;
+    font-size: 0.74rem;
   }
 
   .icon {
-    width: 24px;
-    height: 24px;
-    flex-basis: 24px;
+    width: 23px;
+    height: 23px;
+    flex-basis: 23px;
     border-radius: 7px;
-    font-size: 0.55rem;
+    font-size: 0.53rem;
   }
 }
 </style>
