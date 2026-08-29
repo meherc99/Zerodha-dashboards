@@ -26,21 +26,36 @@ def validate_account_data(data):
     if unexpected:
         return False, f"Unsupported field: {unexpected[0]}"
 
-    required_fields = {
-        'account_name': (1, 100),
+    # account_name is always required
+    account_name = data.get('account_name')
+    if not isinstance(account_name, str) or not account_name.strip():
+        return False, "Missing required field: account_name"
+    if not (1 <= len(account_name.strip()) <= 100):
+        return False, "account_name must be between 1 and 100 characters"
+
+    # Kite Connect fields are optional at creation time but validated when present
+    optional_length_fields = {
         'api_key': (10, 255),
         'api_secret': (10, 255),
         'request_token': (1, 2048),
     }
-    for field, (minimum, maximum) in required_fields.items():
+    for field, (minimum, maximum) in optional_length_fields.items():
         value = data.get(field)
+        if value is None:
+            continue
         if not isinstance(value, str) or not value.strip():
-            return False, f"Missing required field: {field}"
+            return False, f"Invalid value for field: {field}"
         length = len(value.strip())
         if length < minimum or length > maximum:
             return False, (
                 f"{field} must be between {minimum} and {maximum} characters"
             )
+
+    # If any Kite credential is supplied, all three must be supplied together
+    kite_fields = {f for f in ('api_key', 'api_secret', 'request_token') if data.get(f)}
+    if kite_fields and kite_fields != {'api_key', 'api_secret', 'request_token'}:
+        missing = {'api_key', 'api_secret', 'request_token'} - kite_fields
+        return False, f"Must provide all Kite fields together: {', '.join(sorted(missing))}"
 
     return True, None
 

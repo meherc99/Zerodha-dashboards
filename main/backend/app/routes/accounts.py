@@ -70,6 +70,8 @@ def get_account_login_url(account_id):
         return jsonify({'error': 'Account not found'}), 404
 
     try:
+        if not account.api_key_encrypted:
+            return jsonify({'error': 'No Kite API credentials configured for this account'}), 400
         api_key = get_encryptor().decrypt(account.api_key_encrypted)
         login_url = _generate_login_url(api_key)
         parsed_url = urlparse(login_url)
@@ -105,37 +107,56 @@ def create_account():
     existing = Account.query.filter_by(
         user_id=user_id,
         account_name=account_name,
+        is_active=True,
     ).first()
     if existing:
         return jsonify({'error': 'Account name already exists'}), 400
 
     try:
-        # Encrypt credentials
-        encryptor = get_encryptor()
+        # Rename any inactive accounts that still occupy this name so the
+        # DB-level unique constraint (user_id, account_name) doesn't fire.
+        inactive_clashes = Account.query.filter_by(
+            user_id=user_id,
+            account_name=account_name,
+            is_active=False,
+        ).all()
+        for clash in inactive_clashes:
+            clash.account_name = f"{account_name}_deactivated_{clash.id}"
 
-        request_token = data['request_token'].strip()
-        try:
-            access_token = _generate_access_token(
-                data['api_key'].strip(),
-                data['api_secret'].strip(),
-                request_token,
-            )
-        except Exception:
-            logger.warning(
-                'Kite request-token exchange failed while creating account'
-            )
-            return jsonify({
-                'error': 'Failed to generate access token from request token'
-            }), 400
+        encryptor = get_encryptor()
+        has_kite = bool(
+            data.get('api_key') and data.get('api_secret') and data.get('request_token')
+        )
+
+        api_key_enc = None
+        api_secret_enc = None
+        access_token_enc = None
+
+        if has_kite:
+            request_token = data['request_token'].strip()
+            try:
+                access_token = _generate_access_token(
+                    data['api_key'].strip(),
+                    data['api_secret'].strip(),
+                    request_token,
+                )
+            except Exception:
+                logger.warning(
+                    'Kite request-token exchange failed while creating account'
+                )
+                return jsonify({
+                    'error': 'Failed to generate access token from request token'
+                }), 400
+            api_key_enc = encryptor.encrypt(data['api_key'].strip())
+            api_secret_enc = encryptor.encrypt(data['api_secret'].strip())
+            access_token_enc = encryptor.encrypt(access_token)
 
         account = Account(
             account_name=account_name,
             user_id=user_id,
-            api_key_encrypted=encryptor.encrypt(data['api_key'].strip()),
-            api_secret_encrypted=encryptor.encrypt(
-                data['api_secret'].strip()
-            ),
-            access_token_encrypted=encryptor.encrypt(access_token),
+            api_key_encrypted=api_key_enc,
+            api_secret_encrypted=api_secret_enc,
+            access_token_encrypted=access_token_enc,
             # Request tokens are one-time exchange material and are not
             # retained after a successful exchange.
             request_token_encrypted=None,
@@ -151,6 +172,7 @@ def create_account():
 
     except IntegrityError:
         db.session.rollback()
+        logger.warning("IntegrityError while creating account '%s' for user %s", account_name, user_id)
         return jsonify({'error': 'Account name already exists'}), 409
     except Exception:
         db.session.rollback()
@@ -221,6 +243,7 @@ def update_account(account_id):
                 Account.user_id == account.user_id,
                 Account.account_name == account_name,
                 Account.id != account.id,
+                Account.is_active == True,
             ).first()
             if duplicate:
                 return jsonify({'error': 'Account name already exists'}), 409
@@ -228,16 +251,30 @@ def update_account(account_id):
 
         if 'request_token' in data:
             encryptor = get_encryptor()
-            current_api_key = (
-                data['api_key'].strip()
-                if 'api_key' in data
-                else encryptor.decrypt(account.api_key_encrypted)
-            )
-            current_api_secret = (
-                data['api_secret'].strip()
-                if 'api_secret' in data
-                else encryptor.decrypt(account.api_secret_encrypted)
-            )
+            # Resolve api_key: prefer freshly submitted value, fall back to
+            # stored encrypted value (only if credentials were set before).
+            if 'api_key' in data:
+                current_api_key = data['api_key'].strip()
+            elif account.api_key_encrypted:
+                current_api_key = encryptor.decrypt(account.api_key_encrypted)
+            else:
+                return jsonify({
+                    'error': (
+                        'api_key is required when adding Kite credentials '
+                        'for the first time'
+                    )
+                }), 400
+            if 'api_secret' in data:
+                current_api_secret = data['api_secret'].strip()
+            elif account.api_secret_encrypted:
+                current_api_secret = encryptor.decrypt(account.api_secret_encrypted)
+            else:
+                return jsonify({
+                    'error': (
+                        'api_secret is required when adding Kite credentials '
+                        'for the first time'
+                    )
+                }), 400
             try:
                 generated_token = _generate_access_token(
                     current_api_key,
@@ -295,11 +332,14 @@ def delete_account(account_id):
         return jsonify({'error': 'Account not found'}), 404
 
     try:
-        # Soft delete by deactivating
+        # Soft delete by deactivating; rename to free up the account name so
+        # a new account with the same name can be created later.
+        original_name = account.account_name
         account.is_active = False
+        account.account_name = f"{original_name}_deactivated_{account.id}"
         db.session.commit()
 
-        logger.info(f"Deactivated account: {account.account_name}")
+        logger.info(f"Deactivated account: {original_name}")
 
         return jsonify({'message': 'Account deactivated successfully'}), 200
 
