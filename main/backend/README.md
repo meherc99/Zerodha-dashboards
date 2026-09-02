@@ -85,6 +85,32 @@ python -m alembic revision --autogenerate -m "describe the schema change"
 
 Review generated migrations before applying them. Back up persistent data before production upgrades. Do not use `db.create_all()` as a substitute for the migration chain.
 
+### Linking orphaned Zerodha accounts to a user
+
+Revision `4b86235fc91f` added the `users` table and made `accounts.user_id`
+a **nullable** foreign key.  Accounts created before that migration (or in a
+pre-auth development database) will have `user_id = NULL` and will be
+invisible to the authenticated API.
+
+Run the one-time helper script to assign those accounts to a user:
+
+```bash
+# Preview what would change without writing:
+python scripts/migrate_orphaned_accounts.py --dry-run
+
+# Apply:
+python scripts/migrate_orphaned_accounts.py
+```
+
+The script will:
+1. Report the number of orphaned accounts it finds.
+2. If the `users` table is empty, interactively create an admin user.
+3. If exactly one user exists, assign all orphaned accounts to that user.
+4. If multiple users exist, present a numbered list and ask you to choose.
+5. Ask for confirmation, then commit.
+
+The script is idempotent; running it again when no orphans remain is a no-op.
+
 ## Run
 
 ```bash
