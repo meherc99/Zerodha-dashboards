@@ -55,6 +55,8 @@ Use separate random values for `SECRET_KEY` and `JWT_SECRET_KEY`, and use the Fe
 | `RATELIMIT_STORAGE` | `memory` for local work; shared `database` counters are required in production | `memory` |
 | `FINNHUB_API_KEY` | Optional live US quote provider key | unset |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Optional AI-assisted bank-statement parser key | unset |
+| `CELERY_BROKER_URL` | Celery message broker (e.g. `redis://localhost:6379/0`); when unset, PDF parsing runs synchronously | unset |
+| `CELERY_RESULT_BACKEND` | Celery result store; should match `CELERY_BROKER_URL` | unset |
 
 `FLASK_ENV=production` requires distinct Flask/JWT secrets of at least 32
 bytes, a valid Fernet `ENCRYPTION_KEY`, explicit non-wildcard CORS origins, and
