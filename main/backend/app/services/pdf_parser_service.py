@@ -576,6 +576,19 @@ class PDFParserService:
         This is the fallback when pdfplumber fails or has low confidence.
         Converts PDF to images and sends to vision API with structured prompt.
 
+        **Current status: NOT IMPLEMENTED.**
+        Always raises ``RuntimeError`` until the body below is filled in.
+        Call sites in ``parse_statement`` catch this exception and gracefully
+        continue with whatever pdfplumber produced, so the stub does **not**
+        break normal parsing — it only means complex PDFs that pdfplumber
+        cannot handle will fail rather than fall back to AI.
+
+        To enable:
+          1. ``pip install anthropic pdf2image`` (or ``openai`` instead)
+          2. Set ``ANTHROPIC_API_KEY`` **or** ``OPENAI_API_KEY`` in the env
+          3. Replace the ``raise RuntimeError`` below with the actual API call
+             (see the commented-out example implementation that follows it)
+
         Args:
             pdf_path: Path to PDF file
             bank_name: Optional bank name hint for AI
@@ -584,7 +597,7 @@ class PDFParserService:
             Tuple of (transactions list, confidence score)
 
         Raises:
-            RuntimeError: If AI extraction fails or API not configured
+            RuntimeError: Always, until this method is implemented
         """
         try:
             # Check if AI API is configured

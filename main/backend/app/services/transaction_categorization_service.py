@@ -65,7 +65,12 @@ class TransactionCategorizationService:
                     )
                     return category.id, 0.8
 
-        # No match found - return Uncategorized
+        # No keyword match found.
+        # AI categorization is not yet implemented: to enable it, install the
+        # 'anthropic' or 'openai' package, set ANTHROPIC_API_KEY / OPENAI_API_KEY
+        # in your environment, and replace the block below with an AI API call
+        # that maps the description to a category name.  Until then, all
+        # unrecognised descriptions fall through to "Uncategorized".
         uncategorized = TransactionCategory.query.filter_by(
             name='Uncategorized',
             is_system=True,
