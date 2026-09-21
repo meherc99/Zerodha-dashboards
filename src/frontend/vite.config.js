@@ -4,6 +4,8 @@ import { fileURLToPath, URL } from 'node:url'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // Load env from the consolidated repo-root .env (two levels up from src/frontend).
+  envDir: fileURLToPath(new URL('../../', import.meta.url)),
   plugins: [vue()],
   resolve: {
     alias: {

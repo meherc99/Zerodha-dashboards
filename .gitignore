@@ -110,3 +110,37 @@ secrets.json
 # Uploaded bank statement PDFs
 uploads/bank_statements/*
 !uploads/bank_statements/.gitkeep
+
+# Dependencies and build outputs
+node_modules/
+dist/
+dist-ssr/
+
+# Logs
+logs/
+*.log
+lerna-debug.log*
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local environment files
+*.local
+.env.local
+.env.*.local
+
+# Editor and IDE files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.njsproj
+*.ntvs*
+*.sln
+*.suo
+*.sw?
+
+# OS files
+.DS_Store
+
+.superpowers

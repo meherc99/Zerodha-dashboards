@@ -6,8 +6,8 @@ import os
 # Suppress noisy watchdog inotify debug events from site-packages monitoring
 logging.getLogger('watchdog.observers.inotify_buffer').setLevel(logging.WARNING)
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from the consolidated repo-root .env.
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 from app import create_app
 
