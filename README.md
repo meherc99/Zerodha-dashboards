@@ -100,3 +100,34 @@ cd ../frontend && npm test && npm run build
 See [docs/wiki.md §8](docs/wiki.md#8-configuration-and-environment) and
 [§9](docs/wiki.md#9-behavior-contracts) for the full configuration and behavior
 contracts.
+
+## Docker deployment
+
+Docker Compose runs PostgreSQL, the Flask API, and the Vue/nginx frontend as
+one local stack. The application is exposed on port `8080` by default.
+
+```bash
+cp .env.example .env
+# Edit .env and replace all required secret values.
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+The backend container applies pending Alembic migrations before Gunicorn starts.
+If a migration fails, the API does not start; inspect it with
+`docker compose logs backend`.
+
+Open `http://localhost:8080` or `http://SERVER_LAN_IP:8080` from another
+device on the same network. The database, backend instance data, and uploaded
+bank statements are stored in named Docker volumes. Back up those volumes
+before changing the host or removing the stack.
+
+```bash
+docker compose logs -f backend
+docker compose down                    # stop without deleting data
+docker compose down -v                 # destructive: deletes all volumes
+```
+
+For remote personal access, keep the port private and use Tailscale or place
+the stack behind an HTTPS reverse proxy. Do not expose PostgreSQL directly.

@@ -13,14 +13,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   backend:
-    build: ./backend
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: ./.env
+    env_file:
+      - ./.env
     environment:
       FLASK_ENV: production
-      DATABASE_URL: postgresql://zerodha:${POSTGRES_PASSWORD}@database:5432/zerodha_dashboard
+      DATABASE_URL: postgresql://zerodha:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@database:5432/zerodha_dashboard
       RATELIMIT_STORAGE: database
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
     volumes:
@@ -34,15 +38,22 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - "${DASHBOARD_PORT:-8080}:80"
     depends_on:
       backend:
         condition: service_healthy
+
+networks:
+  default:
+    name: zerodha_dashboard
 
 volumes:
   postgres_data:
