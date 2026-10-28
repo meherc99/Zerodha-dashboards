@@ -13,6 +13,7 @@ python-dotenv==1.0.1
 pandas==2.2.1
 numpy==1.26.4
 werkzeug==3.1.8
+gunicorn==23.0.0
 pdfplumber==0.11.10
 pdfminer.six==20260107
 finnhub-python==2.4.20

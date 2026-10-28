@@ -27,6 +27,16 @@ services:
       DATABASE_URL: postgresql://zerodha:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@database:5432/zerodha_dashboard
       RATELIMIT_STORAGE: database
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      AI_CATEGORIZATION_ENABLED: ${AI_CATEGORIZATION_ENABLED:-true}
+      # From inside the container, the host's localhost is reached via
+      # host.docker.internal (mapped below through extra_hosts).
+      AI_CATEGORIZATION_BASE_URL: ${AI_CATEGORIZATION_BASE_URL:-http://host.docker.internal:20128/v1}
+      AI_CATEGORIZATION_MODEL: ${AI_CATEGORIZATION_MODEL:-openrouter/openrouter/free}
+      AI_CATEGORIZATION_API_KEY: ${AI_CATEGORIZATION_API_KEY:-}
+      AI_CATEGORIZATION_TIMEOUT: ${AI_CATEGORIZATION_TIMEOUT:-30}
+      AI_CATEGORIZATION_MAX_TOKENS: ${AI_CATEGORIZATION_MAX_TOKENS:-2048}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - backend_instance:/app/instance
       - statement_uploads:/app/uploads

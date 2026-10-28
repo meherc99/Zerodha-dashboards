@@ -676,6 +676,100 @@ class PDFParserService:
             raise RuntimeError('AI extraction failed') from error
 
     @staticmethod
+    def _is_csv_statement(file_path: str) -> bool:
+        """Return whether a stored statement file is a CSV export."""
+        return bool(file_path) and file_path.lower().endswith('.csv')
+
+    @staticmethod
+    def _extract_from_pdf(pdf_file_path: str) -> Tuple[str, List[Dict], Optional[int]]:
+        """Extract transactions from a PDF using template/pdfplumber/AI.
+
+        Returns:
+            Tuple of (bank_name, transactions, used_template_id).
+        """
+        # Extract text
+        text = PDFParserService.extract_text(pdf_file_path)
+
+        # Detect bank name
+        bank_name = PDFParserService.detect_bank_name(text)
+        logger.info(f"Detected bank: {bank_name}")
+
+        # Try template-based extraction first (fast path)
+        template = PDFParserService.find_template(bank_name)
+        transactions = None
+        used_template_id = None
+
+        if template:
+            try:
+                transactions, confidence = PDFParserService.extract_with_template(
+                    pdf_file_path, template
+                )
+                used_template_id = template.id
+                logger.info(f"Template extraction successful with confidence {confidence:.2f}")
+
+                # Mark template success
+                template.mark_success()
+                db.session.commit()
+
+            except Exception:
+                logger.warning(
+                    "Template extraction failed; using standard parser"
+                )
+                transactions = None
+
+        # Fall back to pdfplumber if no template or template failed
+        if not transactions:
+            try:
+                transactions, confidence = PDFParserService.extract_with_pdfplumber(
+                    pdf_file_path
+                )
+                logger.info(f"PDFPlumber extraction successful with confidence {confidence:.2f}")
+
+                # If pdfplumber confidence is low, try AI as final fallback
+                if confidence < 0.6:
+                    logger.info(f"PDFPlumber confidence {confidence:.2f} is low, trying AI fallback")
+                    try:
+                        ai_transactions, ai_confidence = PDFParserService.fallback_to_ai(
+                            pdf_file_path, bank_name
+                        )
+                        if ai_confidence > confidence:
+                            logger.info(f"AI extraction better: {ai_confidence:.2f} > {confidence:.2f}")
+                            transactions = ai_transactions
+                            confidence = ai_confidence
+                    except Exception:
+                        logger.warning(
+                            "AI fallback failed; using standard parser results"
+                        )
+                        # Keep pdfplumber results even if AI fails
+
+            except Exception as extraction_error:
+                logger.error("Standard bank statement extraction failed")
+
+                # An empty table scan is a deterministic validation
+                # failure, not an infrastructure failure. Keep the
+                # actionable domain error instead of obscuring it behind
+                # an optional AI-provider configuration error.
+                if str(extraction_error) == "No tables found in PDF":
+                    raise ValueError(
+                        "No transaction table found in PDF"
+                    ) from extraction_error
+
+                # Try AI as last resort
+                logger.info("Attempting AI fallback as last resort")
+                try:
+                    transactions, confidence = PDFParserService.fallback_to_ai(
+                        pdf_file_path, bank_name
+                    )
+                    logger.info(f"AI extraction successful with confidence {confidence:.2f}")
+                except Exception as ai_error:
+                    logger.error("All bank statement extraction methods failed")
+                    raise ValueError(
+                        "All extraction methods failed"
+                    ) from ai_error
+
+        return bank_name, transactions, used_template_id
+
+    @staticmethod
     def parse_statement(statement_id: int) -> Dict:
         """
         Main parsing pipeline for a bank statement.
@@ -733,85 +827,17 @@ class PDFParserService:
         try:
             logger.info(f"Starting parsing for statement {statement_id}")
 
-            # Extract text
-            text = PDFParserService.extract_text(statement.pdf_file_path)
-
-            # Detect bank name
-            bank_name = PDFParserService.detect_bank_name(text)
-            logger.info(f"Detected bank: {bank_name}")
-
-            # Try template-based extraction first (fast path)
-            template = PDFParserService.find_template(bank_name)
-            transactions = None
-            used_template_id = None
-
-            if template:
-                try:
-                    transactions, confidence = PDFParserService.extract_with_template(
-                        statement.pdf_file_path, template
-                    )
-                    used_template_id = template.id
-                    logger.info(f"Template extraction successful with confidence {confidence:.2f}")
-
-                    # Mark template success
-                    template.mark_success()
-                    db.session.commit()
-
-                except Exception:
-                    logger.warning(
-                        "Template extraction failed; using standard parser"
-                    )
-                    transactions = None
-
-            # Fall back to pdfplumber if no template or template failed
-            if not transactions:
-                try:
-                    transactions, confidence = PDFParserService.extract_with_pdfplumber(
-                        statement.pdf_file_path
-                    )
-                    logger.info(f"PDFPlumber extraction successful with confidence {confidence:.2f}")
-
-                    # If pdfplumber confidence is low, try AI as final fallback
-                    if confidence < 0.6:
-                        logger.info(f"PDFPlumber confidence {confidence:.2f} is low, trying AI fallback")
-                        try:
-                            ai_transactions, ai_confidence = PDFParserService.fallback_to_ai(
-                                statement.pdf_file_path, bank_name
-                            )
-                            if ai_confidence > confidence:
-                                logger.info(f"AI extraction better: {ai_confidence:.2f} > {confidence:.2f}")
-                                transactions = ai_transactions
-                                confidence = ai_confidence
-                        except Exception:
-                            logger.warning(
-                                "AI fallback failed; using standard parser results"
-                            )
-                            # Keep pdfplumber results even if AI fails
-
-                except Exception as extraction_error:
-                    logger.error("Standard bank statement extraction failed")
-
-                    # An empty table scan is a deterministic validation
-                    # failure, not an infrastructure failure. Keep the
-                    # actionable domain error instead of obscuring it behind
-                    # an optional AI-provider configuration error.
-                    if str(extraction_error) == "No tables found in PDF":
-                        raise ValueError(
-                            "No transaction table found in PDF"
-                        ) from extraction_error
-
-                    # Try AI as last resort
-                    logger.info("Attempting AI fallback as last resort")
-                    try:
-                        transactions, confidence = PDFParserService.fallback_to_ai(
-                            statement.pdf_file_path, bank_name
-                        )
-                        logger.info(f"AI extraction successful with confidence {confidence:.2f}")
-                    except Exception as ai_error:
-                        logger.error("All bank statement extraction methods failed")
-                        raise ValueError(
-                            "All extraction methods failed"
-                        ) from ai_error
+            if PDFParserService._is_csv_statement(statement.pdf_file_path):
+                from app.services.csv_parser_service import CSVParserService
+                bank_name, transactions = CSVParserService.parse_file(
+                    statement.pdf_file_path
+                )
+                used_template_id = None
+                logger.info(f"Detected bank: {bank_name}")
+            else:
+                bank_name, transactions, used_template_id = (
+                    PDFParserService._extract_from_pdf(statement.pdf_file_path)
+                )
 
             if not transactions:
                 raise ValueError("No valid transactions found in PDF")
@@ -852,7 +878,8 @@ class PDFParserService:
                         str(txn['balance'])
                         if txn.get('balance') is not None
                         else None
-                    )
+                    ),
+                    'tags': txn.get('tags') or [],
                 })
 
             # Prepare parsed data

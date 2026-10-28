@@ -26,6 +26,8 @@ class Transaction(db.Model):
     category_confidence = db.Column(db.Float)  # 0-1 score from AI categorization
     verified = db.Column(db.Boolean, default=False, nullable=False)
     notes = db.Column(db.Text)
+    # Analytics tags derived from the source format (e.g. 'category:CASH').
+    tags = db.Column(db.JSON, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -68,6 +70,7 @@ class Transaction(db.Model):
             'category_confidence': self.category_confidence,
             'verified': self.verified,
             'notes': self.notes,
+            'tags': self.tags or [],
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

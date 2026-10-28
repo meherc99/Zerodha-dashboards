@@ -114,3 +114,32 @@ describe('fixed-deposit estimate disclosure', () => {
     expect(table).toContain('Estimated current value')
   })
 })
+
+describe('per-bank CSV formats and transaction tags', () => {
+  it('accepts CSV uploads alongside PDF in the upload modal', async () => {
+    const upload = await source('components/bank/BankUploadModal.vue')
+
+    expect(upload).toContain('accept=".pdf,.csv"')
+    expect(upload).toContain('PDF or CSV (max 10MB)')
+    expect(upload).toContain('Only PDF and CSV files are allowed')
+    expect(upload).toContain("name.endsWith('.csv')")
+    expect(upload).not.toContain("file.type !== 'application/pdf'")
+  })
+
+  it('shows derived tags in the statement review table', async () => {
+    const review = await source('components/bank/StatementReviewModal.vue')
+
+    expect(review).toContain('<th>Tags</th>')
+    expect(review).toContain('v-for="tag in txn.tags"')
+    expect(review).toContain('tag-badge')
+  })
+
+  it('renders transaction tags in the transactions list', async () => {
+    const transactions = await source('components/bank/TransactionsList.vue')
+
+    expect(transactions).toContain('transaction.tags && transaction.tags.length')
+    expect(transactions).toContain('v-for="tag in transaction.tags"')
+    expect(transactions).toContain('tag-badge')
+  })
+})
+

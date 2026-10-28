@@ -24,7 +24,7 @@
               <input
                 ref="fileInput"
                 type="file"
-                accept=".pdf"
+                accept=".pdf,.csv"
                 @change="handleFileSelect"
                 style="display: none"
               />
@@ -34,7 +34,7 @@
                 <p class="drop-text">
                   <strong>Click to upload</strong> or drag and drop
                 </p>
-                <p class="file-hint">PDF only (max 10MB)</p>
+                <p class="file-hint">PDF or CSV (max 10MB)</p>
               </div>
 
               <div v-else class="file-selected">
@@ -180,9 +180,15 @@ const handleDrop = (event) => {
 const validateAndSetFile = (file) => {
   validationError.value = null
 
-  // Check file type
-  if (file.type !== 'application/pdf') {
-    validationError.value = 'Only PDF files are allowed'
+  // Accept PDF and CSV by extension or MIME type (CSV MIME varies by OS).
+  const name = (file.name || '').toLowerCase()
+  const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf')
+  const isCsv =
+    name.endsWith('.csv') ||
+    file.type === 'text/csv' ||
+    file.type === 'application/vnd.ms-excel'
+  if (!isPdf && !isCsv) {
+    validationError.value = 'Only PDF and CSV files are allowed'
     return
   }
 

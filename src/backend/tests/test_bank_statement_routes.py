@@ -486,6 +486,7 @@ class TestStatementPreview:
                 'category_id',
                 'category_confidence',
                 'notes',
+                'tags',
             }
 
         # Check validation warnings

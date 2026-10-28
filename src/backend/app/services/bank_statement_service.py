@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-ALLOWED_EXTENSIONS = {'pdf'}
+ALLOWED_EXTENSIONS = {'pdf', 'csv'}
 DB_MONEY_MAX = Decimal('9999999999999.99')
 OPERATION_LEASE = timedelta(minutes=15)
 UPLOAD_BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -34,6 +34,32 @@ class BankStatementService:
         """Check if file extension is allowed"""
         return '.' in filename and \
                filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+    @staticmethod
+    def _file_extension(filename):
+        """Return the lowercased file extension, or '' when absent."""
+        if not filename or '.' not in filename:
+            return ''
+        return filename.rsplit('.', 1)[1].lower()
+
+    @staticmethod
+    def _validate_csv_content(file):
+        """Reject uploads that are not plausible UTF-8 CSV text."""
+        file.seek(0)
+        sample = file.read(65536)
+        file.seek(0)
+        if not sample:
+            raise ValueError('File is empty')
+        if b'\x00' in sample:
+            raise ValueError('File content is not a valid CSV')
+        newline_index = sample.find(b'\n')
+        header_bytes = sample if newline_index == -1 else sample[:newline_index]
+        try:
+            header_line = header_bytes.decode('utf-8')
+        except UnicodeDecodeError as error:
+            raise ValueError('File content is not a valid CSV') from error
+        if ',' not in header_line:
+            raise ValueError('File content is not a valid CSV')
 
     @staticmethod
     def _get_upload_path(user_id, bank_account_id):
@@ -416,8 +442,9 @@ class BankStatementService:
             raise ValueError('No file provided')
 
         # Validate file type
-        if not BankStatementService._allowed_file(file.filename):
-            raise ValueError('Only PDF files are allowed')
+        extension = BankStatementService._file_extension(file.filename)
+        if extension not in ALLOWED_EXTENSIONS:
+            raise ValueError('Only PDF and CSV files are allowed')
 
         # Validate file size (read in chunks to avoid memory issues)
         file.seek(0, os.SEEK_END)
@@ -430,12 +457,15 @@ class BankStatementService:
         if file_size == 0:
             raise ValueError('File is empty')
 
-        # An extension alone is not a content check. Every PDF begins with this
-        # signature, including PDFs that contain binary data after the header.
-        signature = file.read(5)
-        file.seek(0)
-        if signature != b'%PDF-':
-            raise ValueError('File content is not a valid PDF')
+        # An extension alone is not a content check. Validate the leading
+        # bytes match the declared type before persisting anything.
+        if extension == 'pdf':
+            signature = file.read(5)
+            file.seek(0)
+            if signature != b'%PDF-':
+                raise ValueError('File content is not a valid PDF')
+        else:
+            BankStatementService._validate_csv_content(file)
 
         account = BankAccount.query.filter_by(
             id=bank_account_id,
@@ -454,7 +484,7 @@ class BankStatementService:
                 'This statement has already been uploaded for this account'
             )
 
-        unique_filename = f"{uuid.uuid4()}.pdf"
+        unique_filename = f"{uuid.uuid4()}.{extension}"
 
         # Create directory structure
         upload_dir = BankStatementService._get_upload_path(user_id, bank_account_id)
@@ -779,28 +809,28 @@ class BankStatementService:
         parsed_data = statement.parsed_data
         transactions = parsed_data.get('transactions', [])
 
-        # Auto-categorize transactions
+        # Auto-categorize transactions. Keyword rules run first and only the
+        # remaining transactions hit the AI, batched to respect its rate limit.
+        batch_items = [
+            (txn.get('description', ''), Decimal(txn.get('amount', '0')))
+            for txn in transactions
+        ]
+        categories = TransactionCategorizationService.categorize_batch(
+            batch_items
+        )
+
         categorized_transactions = []
-        for txn in transactions:
-            # Convert string amounts to Decimal for categorization
-            amount = Decimal(txn.get('amount', '0'))
-            description = txn.get('description', '')
-
-            # Get category
-            category_id, confidence = TransactionCategorizationService.auto_categorize(
-                description, amount
-            )
-
-            # Build categorized transaction
+        for txn, (category_id, confidence) in zip(transactions, categories):
             categorized_txn = {
                 'transaction_date': txn.get('date'),
-                'description': description,
+                'description': txn.get('description', ''),
                 'amount': txn.get('amount'),
                 'transaction_type': txn.get('transaction_type'),
                 'running_balance': txn.get('balance'),
                 'category_id': category_id,
                 'category_confidence': confidence,
                 'notes': '',
+                'tags': txn.get('tags') or [],
             }
 
             categorized_transactions.append(categorized_txn)
@@ -872,6 +902,7 @@ class BankStatementService:
             'category_id',
             'category_confidence',
             'notes',
+            'tags',
         }
         for index, transaction in enumerate(transactions, start=1):
             if not isinstance(transaction, dict):
@@ -965,6 +996,29 @@ class BankStatementService:
             ):
                 raise ValueError(f'Transaction {index} has invalid notes')
 
+            tags = transaction.get('tags')
+            normalized_tags = None
+            if tags is not None:
+                if not isinstance(tags, list) or len(tags) > 25:
+                    raise ValueError(f'Transaction {index} has invalid tags')
+                normalized_tags = []
+                seen_tags = set()
+                for tag in tags:
+                    if not isinstance(tag, str):
+                        raise ValueError(
+                            f'Transaction {index} has invalid tags'
+                        )
+                    cleaned_tag = tag.strip()
+                    if not cleaned_tag or len(cleaned_tag) > 100:
+                        raise ValueError(
+                            f'Transaction {index} has invalid tags'
+                        )
+                    key = cleaned_tag.lower()
+                    if key in seen_tags:
+                        continue
+                    seen_tags.add(key)
+                    normalized_tags.append(cleaned_tag)
+
             category_confidence = transaction.get('category_confidence')
             if category_confidence is not None:
                 try:
@@ -995,6 +1049,7 @@ class BankStatementService:
                     'category_id': category_id,
                     'category_confidence': category_confidence,
                     'notes': notes.strip() if isinstance(notes, str) else None,
+                    'tags': normalized_tags,
                 }
             )
 
@@ -1122,6 +1177,7 @@ class BankStatementService:
                     category_id=txn_data.get('category_id'),
                     category_confidence=txn_data.get('category_confidence'),
                     notes=txn_data.get('notes'),
+                    tags=txn_data.get('tags'),
                     verified=True
                 )
 

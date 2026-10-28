@@ -12,7 +12,7 @@ from cryptography.fernet import Fernet
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
-HEAD_REVISION = "855036219916"
+HEAD_REVISION = "c9f1a2b3d4e5"
 LEGACY_REVISION = "b1f00545dd90"
 ENCRYPTION_REVISION = "e82b91a7c4d6"
 TEST_ENCRYPTION_KEY = Fernet.generate_key().decode()
@@ -125,6 +125,19 @@ def test_clean_database_upgrades_to_head(tmp_path):
             SELECT COUNT(*)
             FROM transaction_categories
             WHERE name = 'Uncategorized' AND is_system = 1
+            """
+        ).fetchone()[0] == 1
+        assert "tags" in _columns(connection, "transactions")
+        parsing_template_columns = _columns(connection, "parsing_templates")
+        assert "file_format" in parsing_template_columns
+        assert "is_system" in parsing_template_columns
+        assert connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM parsing_templates
+            WHERE bank_name = 'Trade Republic'
+              AND is_system = 1
+              AND file_format = 'csv'
             """
         ).fetchone()[0] == 1
         revoked_columns = _columns(connection, "revoked_tokens")

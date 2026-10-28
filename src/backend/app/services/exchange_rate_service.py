@@ -39,23 +39,13 @@ class ExchangeRateService:
             }
         """
         try:
-            latest = _fetch('/latest', params={
-                'from': ','.join(self.CURRENCIES),
-                'to': self.BASE,
-            })
-            current_date = latest.get('date', str(date.today()))
-            current_rates = {
-                currency: latest['rates'][self.BASE] / latest['rates'].get(currency, 1)
-                for currency in self.CURRENCIES
-            }
-            # Frankfurter returns rates FROM each currency, so for
-            # "from=USD&to=INR" the response has {"rates": {"INR": 83.5}}.
-            # But with multiple from-currencies it returns per-currency blocks.
-            # Use the simpler per-currency call style to be safe.
             current_rates = {}
+            current_date = None
             for currency in self.CURRENCIES:
                 data = _fetch('/latest', params={'from': currency, 'to': self.BASE})
                 current_rates[currency] = data['rates'][self.BASE]
+                if current_date is None:
+                    current_date = data.get('date', str(date.today()))
         except Exception:
             logger.error('Exchange rate fetch (current) failed')
             raise

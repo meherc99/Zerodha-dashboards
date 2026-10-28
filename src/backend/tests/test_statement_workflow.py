@@ -128,6 +128,7 @@ def test_upload_parse_review_approve_and_analyze_canonical_statement(
         'category_id',
         'category_confidence',
         'notes',
+        'tags',
     }
     assert review_transaction == {
         'transaction_date': transaction_date.isoformat(),
@@ -138,6 +139,7 @@ def test_upload_parse_review_approve_and_analyze_canonical_statement(
         'category_id': groceries_id,
         'category_confidence': 0.8,
         'notes': '',
+        'tags': [],
     }
 
     approved = client.post(

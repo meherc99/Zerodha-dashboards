@@ -16,6 +16,10 @@ class ParsingTemplate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     bank_name = db.Column(db.String(100), nullable=False, index=True)
     template_version = db.Column(db.Integer, default=1, nullable=False)
+    # 'pdf' for pdfplumber layouts, 'csv' for delimited exports.
+    file_format = db.Column(db.String(10), default='pdf', nullable=False)
+    # System formats are predefined, safe to reuse across tenants.
+    is_system = db.Column(db.Boolean, default=False, nullable=False, index=True)
     extraction_config = db.Column(db.JSON, nullable=False)
     # extraction_config format:
     # {
@@ -75,6 +79,8 @@ class ParsingTemplate(db.Model):
             'id': self.id,
             'bank_name': self.bank_name,
             'template_version': self.template_version,
+            'file_format': self.file_format,
+            'is_system': self.is_system,
             'extraction_config': self.extraction_config,
             'success_count': self.success_count,
             'failure_count': self.failure_count,

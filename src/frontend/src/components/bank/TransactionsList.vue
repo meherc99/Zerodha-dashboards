@@ -74,6 +74,18 @@
             <td class="description-cell">
               <span class="description-text">{{ transaction.description }}</span>
               <span v-if="transaction.notes" class="notes">{{ transaction.notes }}</span>
+              <span
+                v-if="transaction.tags && transaction.tags.length"
+                class="tag-list"
+              >
+                <span
+                  v-for="tag in transaction.tags"
+                  :key="tag"
+                  class="tag-badge"
+                >
+                  {{ tag }}
+                </span>
+              </span>
             </td>
             <td class="merchant-cell">{{ transaction.merchant_name || '-' }}</td>
             <td class="category-cell">
@@ -522,6 +534,23 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--color-text-soft);
   margin-top: 4px;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.tag-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--color-surface-muted, #eef2ff);
+  color: var(--color-text-soft);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .merchant-cell {

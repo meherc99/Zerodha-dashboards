@@ -74,6 +74,7 @@
                     <th>Credit</th>
                     <th>Balance</th>
                     <th>Category</th>
+                    <th>Tags</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -121,6 +122,16 @@
                           {{ category.name }}
                         </option>
                       </select>
+                    </td>
+                    <td class="tags-cell">
+                      <span
+                        v-for="tag in txn.tags"
+                        :key="tag"
+                        class="tag-badge"
+                      >
+                        {{ tag }}
+                      </span>
+                      <span v-if="!txn.tags || !txn.tags.length" class="no-tags">—</span>
                     </td>
                   </tr>
                 </tbody>
@@ -576,6 +587,28 @@ const formatDate = (dateString) => {
 
 .category-cell {
   min-width: 150px;
+}
+
+.tags-cell {
+  min-width: 160px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--color-surface-muted, #eef2ff);
+  color: var(--color-text-soft);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.no-tags {
+  color: var(--color-text-soft);
+  font-size: 12px;
 }
 
 .category-select {

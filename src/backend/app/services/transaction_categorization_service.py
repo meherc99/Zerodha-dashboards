@@ -8,12 +8,32 @@ from decimal import Decimal
 from app.database import db
 from app.models.transaction_category import TransactionCategory
 from app.models.transaction import Transaction
+from app.services.ai_categorization_service import AICategorizationService
 
 logger = logging.getLogger(__name__)
 
 
 class TransactionCategorizationService:
     """Service for categorizing transactions using keyword matching"""
+
+    @staticmethod
+    def _match_keyword(description, categories=None):
+        """Return the first system category whose keyword is in the text."""
+        if not description:
+            return None
+        description_lower = description.lower().strip()
+        if categories is None:
+            categories = TransactionCategory.query.filter(
+                TransactionCategory.is_system.is_(True),
+                TransactionCategory.keywords.isnot(None),
+            ).all()
+        for category in categories:
+            if not category.keywords:
+                continue
+            for keyword in category.keywords:
+                if keyword.lower().strip() in description_lower:
+                    return category
+        return None
 
     @staticmethod
     def auto_categorize(description: str, amount: Decimal) -> Tuple[Optional[int], float]:
@@ -39,38 +59,39 @@ class TransactionCategorizationService:
                 return uncategorized.id, 0.5
             return None, 0.5
 
-        # Normalize description for matching
-        description_lower = description.lower().strip()
+        # Try keyword rules first.
+        matched = TransactionCategorizationService._match_keyword(description)
+        if matched:
+            logger.info(
+                "Matched transaction to category %s using a system rule",
+                matched.id,
+            )
+            return matched.id, 0.8
 
-        # Get all categories with keywords
-        categories = TransactionCategory.query.filter(
-            TransactionCategory.is_system.is_(True),
-            TransactionCategory.keywords.isnot(None)
-        ).all()
+        # No keyword match: ask the AI model to pick a system category. Any
+        # failure or an unrecognized answer falls through to Uncategorized.
+        if AICategorizationService.is_enabled():
+            system_categories = TransactionCategory.query.filter(
+                TransactionCategory.is_system.is_(True)
+            ).all()
+            predicted = AICategorizationService.predict_category(
+                description,
+                [category.name for category in system_categories],
+                amount,
+            )
+            if predicted:
+                for category in system_categories:
+                    if (
+                        category.name.lower() == predicted.lower()
+                        and category.name != 'Uncategorized'
+                    ):
+                        logger.info(
+                            "AI matched transaction to category %s",
+                            category.id,
+                        )
+                        return category.id, 0.85
 
-        # Try to match keywords
-        for category in categories:
-            if not category.keywords:
-                continue
-
-            # Check each keyword
-            for keyword in category.keywords:
-                keyword_lower = keyword.lower().strip()
-
-                # Check if keyword is in description
-                if keyword_lower in description_lower:
-                    logger.info(
-                        "Matched transaction to category %s using a system rule",
-                        category.id,
-                    )
-                    return category.id, 0.8
-
-        # No keyword match found.
-        # AI categorization is not yet implemented: to enable it, install the
-        # 'anthropic' or 'openai' package, set ANTHROPIC_API_KEY / OPENAI_API_KEY
-        # in your environment, and replace the block below with an AI API call
-        # that maps the description to a category name.  Until then, all
-        # unrecognised descriptions fall through to "Uncategorized".
+        # Fall through to "Uncategorized".
         uncategorized = TransactionCategory.query.filter_by(
             name='Uncategorized',
             is_system=True,
@@ -118,6 +139,66 @@ class TransactionCategorizationService:
         logger.info(f"Categorized {len(categorized_transactions)} transactions")
 
         return categorized_transactions
+
+    @staticmethod
+    def categorize_batch(
+        items: List[Tuple[str, Decimal]]
+    ) -> List[Tuple[Optional[int], float]]:
+        """Categorize many transactions, batching AI calls to respect limits.
+
+        Keyword rules run first (no network). Only the misses are sent to the
+        AI model, grouped into batches so a large statement stays within the
+        endpoint's request-rate limit.
+
+        Args:
+            items: list of ``(description, amount)`` tuples.
+
+        Returns:
+            List of ``(category_id, confidence)`` aligned with ``items``.
+        """
+        system_categories = TransactionCategory.query.filter(
+            TransactionCategory.is_system.is_(True)
+        ).all()
+        by_name = {category.name.lower(): category for category in system_categories}
+        uncategorized = by_name.get('uncategorized')
+        uncategorized_id = uncategorized.id if uncategorized else None
+        keyworded = [c for c in system_categories if c.keywords]
+
+        results: List[Optional[Tuple[Optional[int], float]]] = [None] * len(items)
+        ai_indices = []
+        for index, (description, _amount) in enumerate(items):
+            matched = TransactionCategorizationService._match_keyword(
+                description, keyworded
+            )
+            if matched:
+                results[index] = (matched.id, 0.8)
+            elif not description:
+                results[index] = (uncategorized_id, 0.5)
+            else:
+                ai_indices.append(index)
+
+        if ai_indices and AICategorizationService.is_enabled():
+            category_names = [category.name for category in system_categories]
+            predictions = AICategorizationService.predict_categories_batch(
+                [items[i] for i in ai_indices],
+                category_names,
+            )
+            for local_index, global_index in enumerate(ai_indices):
+                predicted = predictions[local_index]
+                if predicted:
+                    category = by_name.get(predicted.lower())
+                    if category and category.name != 'Uncategorized':
+                        results[global_index] = (category.id, 0.85)
+                        logger.info(
+                            "AI matched transaction to category %s",
+                            category.id,
+                        )
+
+        for index in range(len(items)):
+            if results[index] is None:
+                results[index] = (uncategorized_id, 0.5)
+
+        return results
 
     @staticmethod
     def learn_from_user_correction(transaction_id: int, new_category_id: int):
