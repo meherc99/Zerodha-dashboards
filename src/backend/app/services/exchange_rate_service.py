@@ -52,22 +52,26 @@ class ExchangeRateService:
 
         try:
             # Frankfurter's /latest returns the most-recent trading day.
-            # Fetch yesterday's date as starting point, walk back up to 7 days
-            # to find the previous trading day's rate.
+            # Walk back from that date, since the latest available rate may
+            # already be several calendar days behind today.
+            latest_date = date.fromisoformat(current_date)
             prev_rates = {}
             prev_date = None
             for currency in self.CURRENCIES:
                 found = False
                 for days_back in range(1, 8):
-                    candidate = date.today() - timedelta(days=days_back)
+                    candidate = latest_date - timedelta(days=days_back)
                     try:
                         data = _fetch(
                             f'/{candidate}',
                             params={'from': currency, 'to': self.BASE},
                         )
+                        response_date = data.get('date', str(candidate))
+                        if date.fromisoformat(response_date) >= latest_date:
+                            continue
                         prev_rates[currency] = data['rates'][self.BASE]
                         if prev_date is None:
-                            prev_date = data.get('date', str(candidate))
+                            prev_date = response_date
                         found = True
                         break
                     except Exception:
